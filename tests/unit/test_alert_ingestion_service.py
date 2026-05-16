@@ -111,6 +111,60 @@ def sample_alertmanager_payload() -> dict:
     }
 
 
+def sample_azure_monitor_payload() -> dict:
+    return {
+        "schemaId": "azureMonitorCommonAlertSchema",
+        "data": {
+            "essentials": {
+                "alertRule": "CheckoutPodRestarting",
+                "severity": "Sev1",
+                "monitorCondition": "Fired",
+                "firedDateTime": "2026-05-16T00:00:00Z",
+                "description": "checkout-api pod is restarting",
+                "originAlertId": "azure-alert-123",
+            },
+            "alertContext": {
+                "condition": {
+                    "allOf": [
+                        {
+                            "dimensions": [
+                                {"name": "namespace", "value": "shopfast"},
+                                {"name": "pod", "value": "checkout-api-7d9c-abcde"},
+                                {"name": "deployment", "value": "checkout-api"},
+                            ]
+                        }
+                    ]
+                }
+            },
+        },
+    }
+
+
+def sample_azure_event_records_payload() -> dict:
+    return {
+        "records": [
+            {
+                "time": "2026-05-16T00:00:00Z",
+                "category": "KubernetesEvent",
+                "resourceId": (
+                    "/subscriptions/sub/resourceGroups/rg/providers/"
+                    "Microsoft.ContainerService/managedClusters/airp-aks"
+                ),
+                "properties": {
+                    "reason": "BackOff",
+                    "type": "Warning",
+                    "message": "Back-off restarting failed container checkout-api",
+                    "involvedObject": {
+                        "kind": "Pod",
+                        "name": "checkout-api-7d9c-abcde",
+                        "namespace": "shopfast",
+                    },
+                },
+            }
+        ]
+    }
+
+
 @pytest.mark.asyncio
 async def test_incident_service_reuses_existing_idempotency_key() -> None:
     session = FakeSession()
@@ -152,6 +206,86 @@ async def test_alert_ingestion_uses_service_idempotency_after_redis_replay() -> 
     assert replay.duplicate_keys == ["prod:shopfast:checkout-api:HighLatency:critical:abc123"]
     assert len(incidents.events) == 1
     assert incidents.events[0][1].event_type == "alert.validated"
+
+
+@pytest.mark.asyncio
+async def test_alert_ingestion_accepts_azure_monitor_common_alert_schema() -> None:
+    incidents = FakeIncidentService()
+    workflow_starter = FakeWorkflowStarter()
+    service = AlertIngestionService(
+        FakeSession(),
+        InMemoryDedupeStore(),
+        workflow_starter=workflow_starter,
+    )
+    service.incidents = incidents
+
+    result = await service.ingest_alertmanager_payload(sample_azure_monitor_payload())
+
+    assert result.created_incident_ids == ["inc-1"]
+    assert workflow_starter.started == [
+        (
+            "inc-1",
+            "critical",
+            "prod:shopfast:checkout-api:CheckoutPodRestarting:critical:azure-alert-123",
+        )
+    ]
+    event = incidents.events[0][1]
+    assert event.event_type == "alert.validated"
+    assert event.payload["service"] == "checkout-api"
+    assert event.payload["labels"]["azure_schema"] == "azureMonitorCommonAlertSchema"
+
+
+@pytest.mark.asyncio
+async def test_alert_ingestion_accepts_azure_event_hub_records() -> None:
+    incidents = FakeIncidentService()
+    service = AlertIngestionService(FakeSession(), InMemoryDedupeStore())
+    service.incidents = incidents
+
+    result = await service.ingest_alertmanager_payload(sample_azure_event_records_payload())
+
+    assert result.created_incident_ids == ["inc-1"]
+    event = incidents.events[0][1]
+    assert event.payload["alert_name"] == "BackOff"
+    assert event.payload["service"] == "checkout-api"
+    assert event.payload["labels"]["azure_event_type"] == "KubernetesEvent"
+
+
+@pytest.mark.asyncio
+async def test_alert_ingestion_groups_repeated_azure_kubernetes_events() -> None:
+    payload_one = sample_azure_event_records_payload()
+    payload_two = sample_azure_event_records_payload()
+    payload_one["records"][0]["id"] = "event-1"
+    payload_two["records"][0]["id"] = "event-2"
+    incidents = FakeIncidentService()
+    service = AlertIngestionService(FakeSession(), InMemoryDedupeStore())
+    service.incidents = incidents
+
+    first = await service.ingest_alertmanager_payload(payload_one)
+    second = await service.ingest_alertmanager_payload(payload_two)
+
+    assert first.created_incident_ids == ["inc-1"]
+    assert second.created_incident_ids == []
+    assert second.duplicate_keys == [
+        (
+            "prod:shopfast:checkout-api:BackOff:warning:"
+            "azure-event:shopfast:checkout-api:BackOff:checkout-api-7d9c-abcde"
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_alert_ingestion_ignores_generic_azure_records_without_signal() -> None:
+    incidents = FakeIncidentService()
+    service = AlertIngestionService(FakeSession(), InMemoryDedupeStore())
+    service.incidents = incidents
+
+    result = await service.ingest_alertmanager_payload(
+        {"records": [{"resourceId": "/subscriptions/sub/resourceGroups/rg/providers/x/s4-payment"}]}
+    )
+
+    assert result.normalized_count == 0
+    assert result.created_incident_ids == []
+    assert incidents.events == []
 
 
 @pytest.mark.asyncio

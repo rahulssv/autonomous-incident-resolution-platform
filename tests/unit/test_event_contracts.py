@@ -64,3 +64,29 @@ def test_alert_consumer_publishes_deadletter_event() -> None:
     assert payload["event_type"] == "airp.deadletter"
     assert payload["error"] == "Kafka message value is not valid JSON"
     assert payload["failed_event"]["offset"] == 42
+
+
+def test_alert_consumer_decodes_event_grid_batch_as_records_payload() -> None:
+    payload = AlertConsumerWorker._decode_payload(
+        json.dumps(
+            [
+                {
+                    "id": "event-1",
+                    "eventType": "Microsoft.ContainerService.KubernetesEvent",
+                    "eventTime": "2026-05-16T00:00:00Z",
+                    "data": {"reason": "BackOff"},
+                }
+            ]
+        )
+    )
+
+    assert payload == {
+        "records": [
+            {
+                "id": "event-1",
+                "eventType": "Microsoft.ContainerService.KubernetesEvent",
+                "eventTime": "2026-05-16T00:00:00Z",
+                "data": {"reason": "BackOff"},
+            }
+        ]
+    }

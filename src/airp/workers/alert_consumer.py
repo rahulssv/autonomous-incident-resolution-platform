@@ -127,6 +127,10 @@ class AlertConsumerWorker:
             payload = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise ValueError("Kafka message value is not valid JSON") from exc
+        if isinstance(payload, list):
+            if not all(isinstance(item, dict) for item in payload):
+                raise ValueError("Kafka message list values must contain only JSON objects")
+            return {"records": payload}
         if not isinstance(payload, dict):
             raise ValueError("Kafka message value must be a JSON object")
 

@@ -101,7 +101,7 @@ services:
 
   api:
     build: .
-    environment:
+    environment: &airp-app-env
       AIRP_DATABASE_URL: postgresql+asyncpg://airp:airp@postgres:5432/airp
       AIRP_REDIS_URL: redis://redis:6379/0
       AIRP_ENVIRONMENT: development
@@ -158,6 +158,39 @@ services:
         condition: service_healthy
       github-mcp:
         condition: service_healthy
+
+  temporal-worker:
+    build: .
+    command: ["python", "-m", "airp.workers.temporal_worker"]
+    restart: unless-stopped
+    environment:
+      <<: *airp-app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+      kubernetes-mcp:
+        condition: service_healthy
+      github-mcp:
+        condition: service_healthy
+
+  alert-consumer:
+    build: .
+    command: ["python", "-m", "airp.workers.alert_consumer"]
+    restart: unless-stopped
+    environment:
+      <<: *airp-app-env
+      AIRP_KAFKA_AUTO_OFFSET_RESET: ${AIRP_KAFKA_ALERT_AUTO_OFFSET_RESET:-latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_started
 
 volumes:
   airp-postgres:
