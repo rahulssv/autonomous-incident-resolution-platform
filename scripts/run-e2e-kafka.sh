@@ -53,8 +53,10 @@ wait_container_running() {
 }
 
 if [[ "${AIRP_E2E_BUILD:-1}" == "1" ]]; then
-  echo "[airp-e2e] Building API image"
-  docker compose build api
+  echo "[airp-e2e] Building API and local MCP images"
+  docker compose build api kubernetes-mcp github-mcp
+  echo "[airp-e2e] Recreating local MCP containers from rebuilt images"
+  docker compose up -d --force-recreate --no-deps kubernetes-mcp github-mcp
 fi
 
 echo "[airp-e2e] Starting live dependencies"

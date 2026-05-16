@@ -311,6 +311,14 @@ async def _github_repository_for_incident(
     if repository_url:
         return repository_url
 
+    dockerhub_repository = await _latest_dockerhub_repository(session, incident.id)
+    github_repo_name = _repo_name_from_container_reference(
+        dockerhub_repository,
+        incident.image_tag,
+    )
+    if github_repo_name:
+        return f"https://github.com/{settings.client_github_org}/{github_repo_name}"
+
     labels = metadata.get("labels") if isinstance(metadata.get("labels"), dict) else {}
     service_name = _first_string(
         metadata.get("service"),
@@ -321,6 +329,20 @@ async def _github_repository_for_incident(
     if service_name:
         return f"https://github.com/{settings.client_github_org}/{service_name}"
     return None
+
+
+async def _latest_dockerhub_repository(session, incident_id: str) -> str | None:
+    stmt = (
+        select(EvidenceItem)
+        .where(EvidenceItem.incident_id == incident_id, EvidenceItem.evidence_type == "dockerhub")
+        .order_by(EvidenceItem.created_at.desc())
+        .limit(1)
+    )
+    dockerhub_evidence = await session.scalar(stmt)
+    data = dockerhub_evidence.data if dockerhub_evidence else {}
+    if not isinstance(data, dict):
+        return None
+    return _first_string(data.get("repository"), data.get("image"))
 
 
 async def _slack_channel_for_incident(
@@ -554,6 +576,21 @@ def _repository_from_payload(payload: Any) -> str | None:
         payload.get("repository"),
         payload.get("repo"),
     )
+
+
+def _repo_name_from_container_reference(*values: Any) -> str | None:
+    for value in values:
+        text = _first_string(value)
+        if not text:
+            continue
+        normalized = text.split("@", 1)[0].strip("/")
+        if "/" in normalized:
+            normalized = normalized.rsplit("/", 1)[1]
+        if ":" in normalized:
+            normalized = normalized.split(":", 1)[0]
+        if normalized:
+            return normalized
+    return None
 
 
 def _incident_service_name(incident: Incident) -> str:
