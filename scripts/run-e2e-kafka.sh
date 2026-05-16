@@ -54,29 +54,29 @@ wait_container_running() {
 
 if [[ "${AIRP_E2E_BUILD:-1}" == "1" ]]; then
   echo "[airp-e2e] Building API and local MCP images"
-  docker compose build api kubernetes-mcp github-mcp
+  docker-compose build api kubernetes-mcp github-mcp
   echo "[airp-e2e] Recreating local MCP containers from rebuilt images"
-  docker compose up -d --force-recreate --no-deps kubernetes-mcp github-mcp
+  docker-compose up -d --force-recreate --no-deps kubernetes-mcp github-mcp
 fi
 
 echo "[airp-e2e] Starting live dependencies"
-docker compose up -d "${CORE_SERVICES[@]}"
+docker-compose up -d "${CORE_SERVICES[@]}"
 
 if [[ "${AIRP_E2E_MIGRATE:-1}" == "1" ]]; then
   echo "[airp-e2e] Running database migrations"
-  docker compose run --rm --no-deps api alembic upgrade head
+  docker-compose run --rm --no-deps api alembic upgrade head
 fi
 
 echo "[airp-e2e] Starting API"
-docker compose up -d api
+docker-compose up -d api
 
 echo "[airp-e2e] Starting temporary Temporal worker: ${TEMPORAL_CONTAINER}"
-docker compose run -d --name "${TEMPORAL_CONTAINER}" --no-deps api \
+docker-compose run -d --name "${TEMPORAL_CONTAINER}" --no-deps api \
   python -m airp.workers.temporal_worker >/dev/null
 wait_container_running "${TEMPORAL_CONTAINER}"
 
 echo "[airp-e2e] Starting temporary Kafka alert consumer: ${ALERT_CONTAINER}"
-docker compose run -d --name "${ALERT_CONTAINER}" --no-deps \
+docker-compose run -d --name "${ALERT_CONTAINER}" --no-deps \
   -e AIRP_KAFKA_ALERT_CONSUMER_GROUP="${E2E_CONSUMER_GROUP}" \
   -e AIRP_KAFKA_AUTO_OFFSET_RESET=latest \
   api \
@@ -86,7 +86,7 @@ wait_container_running "${ALERT_CONTAINER}"
 sleep "${AIRP_E2E_WORKER_WARMUP_SECONDS:-5}"
 
 echo "[airp-e2e] Running Kafka/Event Hubs E2E probe"
-docker compose run --rm --no-deps \
+docker-compose run --rm --no-deps \
   -e AIRP_E2E_API_URL="${AIRP_E2E_API_URL:-http://api:8080}" \
   -e AIRP_E2E_TIMEOUT_SECONDS="${AIRP_E2E_TIMEOUT_SECONDS:-600}" \
   -e AIRP_E2E_POLL_INTERVAL_SECONDS="${AIRP_E2E_POLL_INTERVAL_SECONDS:-5}" \

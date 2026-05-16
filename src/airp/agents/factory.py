@@ -9,6 +9,7 @@ from airp.agents.rca import RCAAgent
 from airp.agents.remediation import RemediationAgent
 from airp.agents.supervisor import LangGraphSupervisor
 from airp.core.config import Settings, get_settings
+from airp.integrations.anthropic_client.client import AnthropicClient
 from airp.integrations.dockerhub.client import DockerHubClient
 from airp.integrations.genaihub.client import GenAIHubClient
 from airp.integrations.github_mcp.client import GitHubMCPClient
@@ -17,9 +18,19 @@ from airp.integrations.kubernetes_mcp.client import KubernetesMCPClient
 
 def build_default_agent_supervisor(settings: Settings | None = None) -> LangGraphSupervisor:
     settings = settings or get_settings()
-    genai_client = None
+
+    # Chat/structured_chat agents use Claude via the Anthropic-compatible gateway
+    # when configured; otherwise fall back to the GenAI Hub (OpenAI-compatible).
+    chat_client: AnthropicClient | GenAIHubClient | None = None
+    if settings.anthropic_auth_token:
+        chat_client = AnthropicClient(settings)
+    elif settings.gateway_base_url and settings.gateway_api_key:
+        chat_client = GenAIHubClient(settings)
+
+    # Embeddings stay on the GenAI Hub: Anthropic has no embeddings API.
+    embedding_client: GenAIHubClient | None = None
     if settings.gateway_base_url and settings.gateway_api_key:
-        genai_client = GenAIHubClient(settings)
+        embedding_client = GenAIHubClient(settings)
 
     evidence_collector = None
     if settings.agent_read_only_evidence_enabled:
@@ -48,14 +59,14 @@ def build_default_agent_supervisor(settings: Settings | None = None) -> LangGrap
         )
 
     return LangGraphSupervisor(
-        monitoring_agent=MonitoringAgent(settings=settings, llm_client=genai_client),
+        monitoring_agent=MonitoringAgent(settings=settings, llm_client=chat_client),
         correlation_agent=CorrelationAgent(),
         rca_agent=RCAAgent(
             settings=settings,
             evidence_collector=evidence_collector,
-            llm_client=genai_client,
+            llm_client=chat_client,
         ),
-        remediation_agent=RemediationAgent(settings=settings, llm_client=genai_client),
-        documentation_agent=DocumentationAgent(settings=settings, llm_client=genai_client),
-        embedding_agent=EmbeddingAgent(settings=settings, embedder=genai_client),
+        remediation_agent=RemediationAgent(settings=settings, llm_client=chat_client),
+        documentation_agent=DocumentationAgent(settings=settings, llm_client=chat_client),
+        embedding_agent=EmbeddingAgent(settings=settings, embedder=embedding_client),
     )
