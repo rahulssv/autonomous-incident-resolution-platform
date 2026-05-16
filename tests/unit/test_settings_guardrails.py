@@ -92,3 +92,36 @@ def test_temporal_worker_concurrency_defaults_are_bounded() -> None:
     assert settings.temporal_worker_max_activity_task_polls == 1
     assert settings.temporal_worker_max_activities_per_second == 0.5
     assert settings.temporal_worker_activity_executor_threads == 2
+
+
+def test_anthropic_airp_environment_names_are_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIRP_ANTHROPIC_BASE_URL", "https://anthropic.example.test/v1")
+    monkeypatch.setenv("AIRP_ANTHROPIC_AUTH_TOKEN", "test-token")
+
+    settings = Settings(_env_file=None)
+
+    assert str(settings.anthropic_base_url).startswith(
+        "https://anthropic.example.test/v1"
+    )
+    assert settings.anthropic_auth_token == "test-token"
+
+
+def test_anthropic_airp_dotenv_names_are_supported(tmp_path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "AIRP_ANTHROPIC_BASE_URL=https://anthropic.example.test/v1",
+                "AIRP_ANTHROPIC_AUTH_TOKEN=test-token",
+            ]
+        )
+    )
+
+    settings = Settings(_env_file=env_file)
+
+    assert str(settings.anthropic_base_url).startswith(
+        "https://anthropic.example.test/v1"
+    )
+    assert settings.anthropic_auth_token == "test-token"

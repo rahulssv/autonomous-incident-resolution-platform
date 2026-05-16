@@ -10,7 +10,7 @@ from airp.agents.remediation import RemediationAgent
 from airp.agents.supervisor import LangGraphSupervisor
 from airp.core.config import Settings, get_settings
 from airp.integrations.dockerhub.client import DockerHubClient
-from airp.integrations.genaihub.client import GenAIHubClient
+from airp.integrations.genaihub.client import AnthropicGatewayClient, GenAIHubClient
 from airp.integrations.github_mcp.client import GitHubMCPClient
 from airp.integrations.kubernetes_mcp.client import KubernetesMCPClient
 
@@ -18,7 +18,9 @@ from airp.integrations.kubernetes_mcp.client import KubernetesMCPClient
 def build_default_agent_supervisor(settings: Settings | None = None) -> LangGraphSupervisor:
     settings = settings or get_settings()
     genai_client = None
-    if settings.gateway_base_url and settings.gateway_api_key:
+    if settings.anthropic_base_url and settings.anthropic_auth_token:
+        genai_client = AnthropicGatewayClient(settings)
+    elif settings.gateway_base_url and settings.gateway_api_key:
         genai_client = GenAIHubClient(settings)
 
     evidence_collector = None

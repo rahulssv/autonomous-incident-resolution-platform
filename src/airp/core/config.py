@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     gateway_base_url: AnyHttpUrl | None = None
     gateway_api_key: str | None = None
     gateway_max_retries: int = Field(default=0, ge=0, le=5)
+    anthropic_base_url: AnyHttpUrl | None = None
+    anthropic_auth_token: str | None = None
     llm_monitoring_model: str = "gpt-4.1-nano"
     llm_correlation_model: str = "gpt-4.1"
     llm_rca_model: str = "gpt-5.2-CIO"
@@ -141,6 +143,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "gateway_base_url",
+        "anthropic_base_url",
         "kubernetes_mcp_url",
         "github_mcp_url",
         "slack_webhook_url",

@@ -62,9 +62,10 @@ class DependencyProbeRunner:
         return ProbeResult(True)
 
     async def genaihub(self) -> ProbeResult:
-        if not self.settings.gateway_base_url:
-            return ProbeResult(False, "gateway_base_url is not configured")
-        return await self._http_get(str(self.settings.gateway_base_url))
+        base_url = self._llm_gateway_base_url()
+        if not base_url:
+            return ProbeResult(False, "llm gateway base_url is not configured")
+        return await self._http_get(str(base_url))
 
     async def kubernetes_mcp(self) -> ProbeResult:
         if not self.settings.kubernetes_mcp_url:
@@ -88,6 +89,13 @@ class DependencyProbeRunner:
             if response.status_code >= 500:
                 return ProbeResult(False, f"http {response.status_code}")
             return ProbeResult(True)
+
+    def _llm_gateway_base_url(self) -> object | None:
+        if self.settings.anthropic_base_url and self.settings.anthropic_auth_token:
+            return self.settings.anthropic_base_url
+        if self.settings.gateway_base_url and self.settings.gateway_api_key:
+            return self.settings.gateway_base_url
+        return self.settings.anthropic_base_url or self.settings.gateway_base_url
 
 
 async def apply_active_probes(
