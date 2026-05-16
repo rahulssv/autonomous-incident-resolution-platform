@@ -4,7 +4,13 @@ from datetime import UTC, datetime
 from airp.core.middleware import CORRELATION_ID_HEADER, REQUEST_ID_HEADER
 from airp.domain.enums import IncidentStatus
 from airp.main import create_app
-from airp.schemas.catalog import DiscoveryRefreshRequest, ServiceCreate
+from airp.schemas.catalog import (
+    DiscoveryRefreshRequest,
+    RepositoryRead,
+    RuntimeWorkloadRead,
+    ServiceCreate,
+    ServiceRead,
+)
 from airp.schemas.common import OperatorCommandRead, Page
 from airp.schemas.incidents import (
     DocumentationReportCreate,
@@ -23,9 +29,11 @@ from airp.schemas.incidents import (
     ModelCallRead,
     RCAHypothesisRead,
     RemediationPlanRead,
+    SearchResult,
     SlackMessageRead,
     ToolCallRead,
 )
+from airp.schemas.policy import EffectivePolicyRead
 
 
 def test_app_registers_expected_routes() -> None:
@@ -34,6 +42,7 @@ def test_app_registers_expected_routes() -> None:
 
     assert "/api/health" in paths
     assert "/api/readiness" in paths
+    assert "/api/policy" in paths
     assert "/api/incidents" in paths
     assert "/api/incidents/{incident_id}/workflow/signals" in paths
     assert "/api/incidents/{incident_id}/workflow/state" in paths
@@ -83,6 +92,7 @@ def test_incident_artifact_routes_use_paginated_response_models() -> None:
         "/api/incidents/{incident_id}/documentation-reports": Page[DocumentationReportRead],
         "/api/incidents/{incident_id}/github-artifacts": Page[GitHubArtifactRead],
         "/api/incidents/{incident_id}/slack-messages": Page[SlackMessageRead],
+        "/api/incidents/{incident_id}/audit": Page[IncidentEventRead],
     }
     get_routes = {
         route.path: route for route in app.routes if "GET" in getattr(route, "methods", set())
@@ -120,6 +130,32 @@ def test_operator_command_routes_use_response_models() -> None:
         .response_model
         == OperatorCommandRead
     )
+
+
+def test_policy_route_uses_effective_policy_response_model() -> None:
+    app = create_app()
+    get_routes = {
+        route.path: route for route in app.routes if "GET" in getattr(route, "methods", set())
+    }
+
+    assert get_routes["/api/policy"].response_model == EffectivePolicyRead
+
+
+def test_core_list_routes_use_paginated_response_models() -> None:
+    app = create_app()
+    expected_response_models = {
+        "/api/incidents": Page[IncidentRead],
+        "/api/services": Page[ServiceRead],
+        "/api/repositories": Page[RepositoryRead],
+        "/api/workloads": Page[RuntimeWorkloadRead],
+        "/api/search/incidents": Page[SearchResult],
+    }
+    get_routes = {
+        route.path: route for route in app.routes if "GET" in getattr(route, "methods", set())
+    }
+
+    for path, response_model in expected_response_models.items():
+        assert get_routes[path].response_model == response_model
 
 
 def test_workflow_state_and_audit_export_schema_shape() -> None:

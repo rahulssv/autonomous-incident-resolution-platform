@@ -137,20 +137,47 @@ class IncidentService:
             stmt = stmt.where(Incident.environment == environment)
         return list((await self.session.scalars(stmt)).all())
 
+    async def count_incidents(
+        self,
+        *,
+        status: str | None = None,
+        severity: str | None = None,
+        service_id: str | None = None,
+        environment: str | None = None,
+    ) -> int:
+        stmt = select(func.count()).select_from(Incident)
+        if status:
+            stmt = stmt.where(Incident.status == status)
+        if severity:
+            stmt = stmt.where(Incident.severity == severity)
+        if service_id:
+            stmt = stmt.where(Incident.service_id == service_id)
+        if environment:
+            stmt = stmt.where(Incident.environment == environment)
+        return int(await self.session.scalar(stmt) or 0)
+
     async def get_incident(self, incident_id: str) -> Incident:
         incident = await self.session.get(Incident, incident_id)
         if incident is None:
             raise NotFoundError("incident", incident_id)
         return incident
 
-    async def get_events(self, incident_id: str) -> list[IncidentEvent]:
+    async def get_events(
+        self, incident_id: str, *, limit: int | None = None, offset: int = 0
+    ) -> list[IncidentEvent]:
         await self.get_incident(incident_id)
         stmt = (
             select(IncidentEvent)
             .where(IncidentEvent.incident_id == incident_id)
             .order_by(IncidentEvent.created_at)
         )
+        if limit is not None:
+            stmt = stmt.limit(limit).offset(offset)
         return list((await self.session.scalars(stmt)).all())
+
+    async def count_events(self, incident_id: str) -> int:
+        await self.get_incident(incident_id)
+        return await self._count_for_incident(IncidentEvent, incident_id)
 
     async def get_latest_workflow_event(self, incident_id: str) -> IncidentEvent | None:
         await self.get_incident(incident_id)

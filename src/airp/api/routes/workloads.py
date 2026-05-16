@@ -3,7 +3,9 @@ from typing import Annotated
 from fastapi import APIRouter, Query, status
 
 from airp.api.deps import CurrentPrincipal, DbSession
+from airp.api.responses import PAGINATED_LIST_RESPONSES
 from airp.schemas.catalog import RuntimeWorkloadCreate, RuntimeWorkloadRead
+from airp.schemas.common import Page
 from airp.services.catalog_service import CatalogService
 
 router = APIRouter()
@@ -19,7 +21,7 @@ async def upsert_workload(
     return RuntimeWorkloadRead.model_validate(workload)
 
 
-@router.get("", response_model=list[RuntimeWorkloadRead])
+@router.get("", response_model=Page[RuntimeWorkloadRead], responses=PAGINATED_LIST_RESPONSES)
 async def list_workloads(
     session: DbSession,
     _: CurrentPrincipal,
@@ -27,11 +29,14 @@ async def list_workloads(
     service_id: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[RuntimeWorkloadRead]:
-    workloads = await CatalogService(session).list_workloads(
+) -> Page[RuntimeWorkloadRead]:
+    service = CatalogService(session)
+    workloads = await service.list_workloads(
         namespace=namespace,
         service_id=service_id,
         limit=limit,
         offset=offset,
     )
-    return [RuntimeWorkloadRead.model_validate(workload) for workload in workloads]
+    items = [RuntimeWorkloadRead.model_validate(workload) for workload in workloads]
+    total = await service.count_workloads(namespace=namespace, service_id=service_id)
+    return Page[RuntimeWorkloadRead](items=items, total=total, limit=limit, offset=offset)

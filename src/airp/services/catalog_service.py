@@ -1,6 +1,6 @@
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +34,19 @@ class CatalogService:
             stmt = stmt.where(ServiceCatalog.namespace == namespace)
         return list((await self.session.scalars(stmt)).all())
 
+    async def count_services(
+        self,
+        *,
+        environment: str | None = None,
+        namespace: str | None = None,
+    ) -> int:
+        stmt = select(func.count()).select_from(ServiceCatalog)
+        if environment:
+            stmt = stmt.where(ServiceCatalog.environment == environment)
+        if namespace:
+            stmt = stmt.where(ServiceCatalog.namespace == namespace)
+        return int(await self.session.scalar(stmt) or 0)
+
     async def create_service(self, payload: ServiceCreate) -> ServiceCatalog:
         values = _payload_with_extra(payload.model_dump(mode="json"))
         service = ServiceCatalog(**values)
@@ -55,6 +68,10 @@ class CatalogService:
     async def list_repositories(self, *, limit: int = 100, offset: int = 0) -> list[Repository]:
         stmt = select(Repository).order_by(Repository.name).limit(limit).offset(offset)
         return list((await self.session.scalars(stmt)).all())
+
+    async def count_repositories(self) -> int:
+        stmt = select(func.count()).select_from(Repository)
+        return int(await self.session.scalar(stmt) or 0)
 
     async def create_repository(self, payload: RepositoryCreate) -> Repository:
         values = _payload_with_extra(payload.model_dump(mode="json"))
@@ -83,6 +100,19 @@ class CatalogService:
             stmt = stmt.where(RuntimeWorkload.service_id == service_id)
         stmt = stmt.limit(limit).offset(offset)
         return list((await self.session.scalars(stmt)).all())
+
+    async def count_workloads(
+        self,
+        *,
+        namespace: str | None = None,
+        service_id: str | None = None,
+    ) -> int:
+        stmt = select(func.count()).select_from(RuntimeWorkload)
+        if namespace:
+            stmt = stmt.where(RuntimeWorkload.namespace == namespace)
+        if service_id:
+            stmt = stmt.where(RuntimeWorkload.service_id == service_id)
+        return int(await self.session.scalar(stmt) or 0)
 
     async def upsert_workload(self, payload: RuntimeWorkloadCreate) -> RuntimeWorkload:
         values = _payload_with_extra(payload.model_dump(mode="json"))

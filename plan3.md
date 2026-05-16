@@ -35,7 +35,8 @@ Already implemented:
 - Read APIs for remediation plans, documentation report drafts, GitHub artifacts, and Slack messages.
 - Read API for persisted incident graph embeddings with safe vector metadata.
 - Request/correlation ID middleware with response headers and CORS exposure.
-- Generic paginated response schema and total-count pagination for incident artifact read APIs: evidence, tool calls, RCA hypotheses, model calls, remediation plans, documentation reports, embeddings, GitHub artifacts, and Slack messages.
+- Generic paginated response schema and total-count pagination for incident artifact, audit, catalog, repository, workload, incident search, and incident list APIs.
+- Read-only effective policy API for disabled-by-default external actions, repository/namespace allowlists, and MCP read settings with secrets redacted.
 - Disabled-by-default external action policy flags and shared artifact idempotency helper for future GitHub, Slack, PR, and documentation writes.
 - Remediation Agent LangGraph node with typed output, prompt, deterministic fallback, policy grounding, and internal remediation-plan persistence.
 - Documentation Agent LangGraph node with typed report-draft output, prompt, deterministic fallback, and publishing disabled by policy.
@@ -80,7 +81,7 @@ Verified from the current repository on 2026-05-16:
 - Current Temporal workflow invokes a LangGraph supervisor through the `agent_graph_run` activity and persists RCA artifacts, proposed remediation plans, and documentation report drafts.
 - Current graph embedding output is persisted to `incident_embeddings`; pgvector conversion and semantic ranking remain pending.
 - Current GenAI Hub integration is used as an optional LLM/embedding adapter; RCA, Remediation, and Documentation prompt/model-call paths are implemented, while shared prompt loading and production evals are still pending.
-- Current verification baseline is `./scripts/verify.sh` with 77 passing tests.
+- Current verification baseline is `./scripts/verify.sh` with 80 passing tests.
 
 ## Remaining Work Summary
 
@@ -98,7 +99,7 @@ The remaining product work is:
 - GenAI Hub production agent controls beyond the RCA prompt: shared prompt loading, model fallback policy, token/cost tracking, groundedness rules, prompt-injection hardening, and eval fixtures.
 - Incident memory: persisted graph embeddings, pgvector-backed embeddings, semantic search, background embedding jobs, ranking tests, and secret-safe embedding policy.
 - End-to-end RCA, remediation, documentation, and knowledge-loop behavior.
-- API completion for policy management and remaining paginated list flows.
+- API completion for future policy mutation flows and production-specific administrative APIs.
 - Observability, security hardening, CI/CD, AKS production deployment, end-to-end simulations, resilience testing, and handoff documentation.
 
 ## Product Guardrails
@@ -139,7 +140,7 @@ Tasks:
 - [ ] Convert `incident_embeddings.vector` from JSON to `pgvector.Vector`.
 - [ ] Add repository-layer classes for incident, catalog, approval, evidence, model-call, tool-call, GitHub artifact, and Slack message queries.
 - [x] Add pagination response shape: `items`, `limit`, `offset`, `total`.
-- [ ] Update list APIs to return paginated responses.
+- [x] Update list APIs to return paginated responses.
 - [ ] Add update endpoints for services, repositories, workloads, incidents, remediation plans, and approvals where appropriate.
 - [ ] Add archive semantics for service catalog, repositories, workloads, and stale records.
 - [ ] Add database check constraints for incident status, severity, remediation status, risk level, and approval decision.
@@ -631,7 +632,8 @@ Tasks:
 - [x] Add remediation plan listing endpoint.
 - [x] Add documentation report listing endpoint.
 - [x] Add audit export endpoint.
-- [ ] Add policy management endpoint for Admin users.
+- [x] Add read-only effective policy endpoint for operators.
+- [ ] Add policy mutation endpoint for Admin users when policy persistence exists.
 - [x] Add manual discovery refresh endpoint.
 - [x] Add manual documentation republish endpoint.
 - [ ] Add OpenAPI examples for all production APIs.
@@ -909,7 +911,8 @@ Highest-priority remaining engineering tasks:
 - [x] Add API endpoints for GitHub artifacts and Slack messages.
 - [x] Add API endpoint for audit export.
 - [x] Add API endpoints for discovery refresh and report republish.
-- [ ] Add API endpoints for policy management.
+- [x] Add read-only effective policy API endpoint.
+- [ ] Add API endpoints for policy mutation.
 - [ ] Add CI/CD workflows for lint, tests, migrations, Docker build, image scanning, SBOM, Helm checks, release, deployment, and rollback.
 - [ ] Deploy and validate AIRP API, alert consumer, and Temporal worker on Azure AKS with Kubernetes secrets and production auth.
 - [ ] Run end-to-end simulations for latency, crash loop, bad config, and failed deployment incidents.
@@ -929,7 +932,8 @@ Foundation and data:
 - [ ] Add repository-layer query classes for incidents, catalog, approvals, evidence, model calls, tool calls, GitHub artifacts, and Slack messages.
 - [ ] Add repository-layer query classes for remediation plans, documentation reports, and incident embeddings.
 - [x] Add total-count pagination response models for incident artifact read APIs.
-- [ ] Extend paginated responses to remaining catalog, incident, search, workflow, and future artifact list APIs where appropriate.
+- [x] Extend paginated responses to current catalog, incident, search, and artifact list APIs.
+- [ ] Keep future list APIs paginated when added.
 - [ ] Add update/archive semantics for catalog, repositories, workloads, incidents, remediation plans, and approvals where appropriate.
 - [ ] Add database check constraints and optimistic concurrency for approval-sensitive writes.
 - [x] Add request ID and correlation ID middleware with response headers.
@@ -1013,7 +1017,8 @@ API completion:
 - [x] Add incident embedding listing endpoint.
 - [x] Add GitHub artifact and Slack message listing endpoints.
 - [x] Add audit export endpoint.
-- [ ] Add Admin policy management endpoint.
+- [x] Add read-only effective policy endpoint.
+- [ ] Add Admin policy mutation endpoint.
 - [x] Add discovery refresh and documentation republish endpoints.
 - [ ] Add OpenAPI examples for production APIs.
 
@@ -1291,17 +1296,55 @@ Verification:
 - `pytest tests/integration/test_backend_smoke.py -q` passes with 11 tests.
 - `./scripts/verify.sh` passes with 77 tests.
 
-## Immediate Next Sprint
+## Completed Sprint: Read-Only Effective Policy API
 
 Sprint goal: add read-only policy visibility so operators can inspect the disabled-by-default automation guardrails before write paths are implemented.
 
 Tasks:
 
-1. [ ] Add policy read schemas for GitHub issue creation, Slack notification, remediation PR creation, documentation publishing, repository allowlists, namespace allowlists, and MCP read settings.
-2. [ ] Add `GET /api/policy` or equivalent Admin policy endpoint returning effective runtime settings without secrets.
-3. [ ] Add OpenAPI examples for the effective policy response.
-4. [ ] Add tests that policy responses redact secrets and preserve disabled-by-default write flags.
-5. [ ] Keep policy mutation, GitHub writes, Slack sends, wiki publishing, branch creation, and PR creation disabled.
+1. [x] Add policy read schemas for GitHub issue creation, Slack notification, remediation PR creation, documentation publishing, repository allowlists, namespace allowlists, and MCP read settings.
+2. [x] Add `GET /api/policy` endpoint returning effective runtime settings without secrets.
+3. [x] Add OpenAPI examples for the effective policy response.
+4. [x] Add tests that policy responses redact secrets and preserve disabled-by-default write flags.
+5. [x] Keep policy mutation, GitHub writes, Slack sends, wiki publishing, branch creation, and PR creation disabled.
+
+Verification:
+
+- Focused `ruff check` for touched policy API, schema, service, and tests passes.
+- Focused policy and backend smoke tests pass with 16 tests.
+- `./scripts/verify.sh` passes with 79 tests.
+
+## Completed Sprint: Core List Pagination Consistency
+
+Sprint goal: finish pagination consistency for core operator list endpoints.
+
+Tasks:
+
+1. [x] Add total-count service helpers for incidents, services, repositories, workloads, and search results.
+2. [x] Convert `GET /api/incidents` to `Page[IncidentRead]`.
+3. [x] Convert `GET /api/services`, `GET /api/repositories`, and `GET /api/workloads` to `Page[...]` responses.
+4. [x] Convert `GET /api/search/incidents` to a paginated response while preserving its current search filters.
+5. [x] Add route response-model and schema tests for the newly paginated list endpoints.
+6. [x] Update OpenAPI examples for the newly paginated list endpoints.
+
+Verification:
+
+- Focused `ruff check` for touched pagination API, service, and smoke-test files passes.
+- `pytest tests/integration/test_backend_smoke.py -q` passes with 13 tests.
+- `./scripts/verify.sh` passes with 80 tests.
+
+## Immediate Next Sprint
+
+Sprint goal: start production authorization hardening beyond the current Entra JWT boundary.
+
+Tasks:
+
+1. [ ] Define shared AIRP role constants for `AIRP.Admin`, `AIRP.SRE`, `AIRP.Viewer`, and `AIRP.Approver`.
+2. [ ] Add route-level role dependencies to require Admin for catalog/policy-style operations.
+3. [ ] Require SRE/Admin for incident mutations and workflow signals.
+4. [ ] Require Approver/Admin for approval decisions.
+5. [ ] Keep read-only routes available to authenticated Viewer/SRE/Admin/Approver callers.
+6. [ ] Add tests for route dependency wiring and role helper behavior without requiring live Entra tokens.
 
 ## Verified Remaining Critical Path
 
@@ -1311,7 +1354,7 @@ Verified from the repository on 2026-05-16:
 2. Governance: wire the existing feature flags, idempotency helper, repository allowlists, and namespace allowlists into future write paths, then add approval policy and blocked-path policy before any GitHub or Slack writes.
 3. Agent completion: extend the Remediation and Documentation nodes with approval workflow states, final artifact enrichment, and governed external writes.
 4. Memory: add pgvector migration, confirm embedding dimensions, and switch incident search to vector-backed ranking when query text is present.
-5. APIs: add policy and remaining paginated list endpoints.
+5. APIs: add production-specific administrative APIs as later policy/storage capabilities are introduced.
 6. Operations: add metrics, health/readiness checks, structured logging with request/correlation IDs, CI/CD workflows, scans, SBOM, and AKS production validation.
 
 ## Production-Ready Definition

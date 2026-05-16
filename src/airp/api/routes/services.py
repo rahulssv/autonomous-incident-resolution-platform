@@ -5,8 +5,9 @@ from uuid import uuid4
 from fastapi import APIRouter, Query, status
 
 from airp.api.deps import CurrentPrincipal, DbSession
+from airp.api.responses import PAGINATED_LIST_RESPONSES
 from airp.schemas.catalog import DiscoveryRefreshRequest, ServiceCreate, ServiceRead
-from airp.schemas.common import OperatorCommandRead
+from airp.schemas.common import OperatorCommandRead, Page
 from airp.services.catalog_service import CatalogService
 
 router = APIRouter()
@@ -41,7 +42,7 @@ async def create_service(
     return ServiceRead.model_validate(service)
 
 
-@router.get("", response_model=list[ServiceRead])
+@router.get("", response_model=Page[ServiceRead], responses=PAGINATED_LIST_RESPONSES)
 async def list_services(
     session: DbSession,
     _: CurrentPrincipal,
@@ -49,14 +50,17 @@ async def list_services(
     namespace: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[ServiceRead]:
-    services = await CatalogService(session).list_services(
+) -> Page[ServiceRead]:
+    service = CatalogService(session)
+    services = await service.list_services(
         environment=environment,
         namespace=namespace,
         limit=limit,
         offset=offset,
     )
-    return [ServiceRead.model_validate(service) for service in services]
+    items = [ServiceRead.model_validate(service_item) for service_item in services]
+    total = await service.count_services(environment=environment, namespace=namespace)
+    return Page[ServiceRead](items=items, total=total, limit=limit, offset=offset)
 
 
 @router.post(

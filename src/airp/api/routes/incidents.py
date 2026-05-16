@@ -123,7 +123,7 @@ async def create_incident(
     return IncidentRead.model_validate(incident)
 
 
-@router.get("", response_model=list[IncidentRead])
+@router.get("", response_model=Page[IncidentRead], responses=INCIDENT_ARTIFACT_PAGE_RESPONSES)
 async def list_incidents(
     session: DbSession,
     _: CurrentPrincipal,
@@ -133,8 +133,9 @@ async def list_incidents(
     environment: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[IncidentRead]:
-    incidents = await IncidentService(session).list_incidents(
+) -> Page[IncidentRead]:
+    service = IncidentService(session)
+    incidents = await service.list_incidents(
         status=incident_status,
         severity=severity,
         service_id=service_id,
@@ -142,7 +143,14 @@ async def list_incidents(
         limit=limit,
         offset=offset,
     )
-    return [IncidentRead.model_validate(incident) for incident in incidents]
+    items = [IncidentRead.model_validate(incident) for incident in incidents]
+    total = await service.count_incidents(
+        status=incident_status,
+        severity=severity,
+        service_id=service_id,
+        environment=environment,
+    )
+    return Page[IncidentRead](items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get("/{incident_id}", response_model=IncidentRead)
@@ -197,14 +205,23 @@ async def get_workflow_state(
     )
 
 
-@router.get("/{incident_id}/audit", response_model=list[IncidentEventRead])
+@router.get(
+    "/{incident_id}/audit",
+    response_model=Page[IncidentEventRead],
+    responses=INCIDENT_ARTIFACT_PAGE_RESPONSES,
+)
 async def get_audit_events(
     incident_id: str,
     session: DbSession,
     _: CurrentPrincipal,
-) -> list[IncidentEventRead]:
-    events = await IncidentService(session).get_events(incident_id)
-    return [IncidentEventRead.model_validate(event) for event in events]
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> Page[IncidentEventRead]:
+    service = IncidentService(session)
+    events = await service.get_events(incident_id, limit=limit, offset=offset)
+    items = [IncidentEventRead.model_validate(event) for event in events]
+    total = await service.count_events(incident_id)
+    return Page[IncidentEventRead](items=items, total=total, limit=limit, offset=offset)
 
 
 @router.get(
