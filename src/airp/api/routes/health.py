@@ -40,6 +40,7 @@ async def build_readiness_response(
     active_checks: bool = False,
     probes: dict[str, Probe] | None = None,
 ) -> ReadinessResponse:
+    llm_gateway = _llm_gateway_status(settings)
     dependencies = {
         "postgres": _configured_dependency(
             configured=bool(settings.database_url),
@@ -72,10 +73,11 @@ async def build_readiness_response(
             },
         ),
         "genaihub": _configured_dependency(
-            configured=bool(settings.gateway_base_url and settings.gateway_api_key),
-            required=bool(settings.gateway_base_url or settings.gateway_api_key),
+            configured=llm_gateway["configured"],
+            required=llm_gateway["required"],
             details={
-                "base_url": str(settings.gateway_base_url) if settings.gateway_base_url else None,
+                "provider": llm_gateway["provider"],
+                "base_url": llm_gateway["base_url"],
                 "check_mode": "configuration_only",
                 "reachability": "not_checked",
             },
@@ -144,6 +146,37 @@ def _configured_dependency(
         required=required,
         details=details,
     )
+
+
+def _llm_gateway_status(settings: Settings) -> dict[str, object]:
+    anthropic_configured = bool(
+        settings.anthropic_base_url and settings.anthropic_auth_token
+    )
+    genaihub_configured = bool(settings.gateway_base_url and settings.gateway_api_key)
+    if anthropic_configured:
+        return {
+            "provider": "anthropic",
+            "base_url": str(settings.anthropic_base_url),
+            "configured": True,
+            "required": True,
+        }
+    if genaihub_configured:
+        return {
+            "provider": "genaihub",
+            "base_url": str(settings.gateway_base_url),
+            "configured": True,
+            "required": True,
+        }
+    anthropic_present = bool(settings.anthropic_base_url or settings.anthropic_auth_token)
+    genaihub_present = bool(settings.gateway_base_url or settings.gateway_api_key)
+    provider = "anthropic" if anthropic_present else "genaihub"
+    base_url = settings.anthropic_base_url if anthropic_present else settings.gateway_base_url
+    return {
+        "provider": provider,
+        "base_url": str(base_url) if base_url else None,
+        "configured": False,
+        "required": anthropic_present or genaihub_present,
+    }
 
 
 def _mcp_dependency(

@@ -167,6 +167,27 @@ async def test_readiness_reports_mcp_configuration_status() -> None:
 
 
 @pytest.mark.asyncio
+async def test_readiness_prefers_anthropic_llm_gateway() -> None:
+    response = await build_readiness_response(
+        Settings(
+            anthropic_base_url="https://anthropic.example.test/v1",
+            anthropic_auth_token="test-token",
+            gateway_base_url="https://gateway.example.test",
+            gateway_api_key="legacy-token",
+        )
+    )
+
+    dependency = response.dependencies["genaihub"]
+
+    assert dependency.status == "ready"
+    assert dependency.details["provider"] == "anthropic"
+    assert str(dependency.details["base_url"]).startswith(
+        "https://anthropic.example.test/v1"
+    )
+    assert "token" not in dependency.details
+
+
+@pytest.mark.asyncio
 async def test_active_readiness_degrades_when_required_probe_fails() -> None:
     async def unavailable_postgres() -> ProbeResult:
         return ProbeResult(False, "connection refused")

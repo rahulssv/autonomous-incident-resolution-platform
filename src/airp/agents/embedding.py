@@ -73,7 +73,7 @@ class EmbeddingAgent:
                 vector_count=0,
                 skipped=True,
                 reason=(
-                    "Embedding generation skipped because GenAI Hub recently returned a "
+                    "Embedding generation skipped because the LLM gateway recently returned a "
                     f"rate limit response. Cooldown remaining: {cooldown_remaining:.0f}s."
                 ),
             )

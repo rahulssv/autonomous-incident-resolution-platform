@@ -19,22 +19,32 @@ from airp.integrations.genaihub.redaction import redact_payload
 StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
 
 
-class GenAIHubClient:
-    """Production-safe OpenAI-compatible client for the GenAI Hub gateway."""
+class OpenAICompatibleGatewayClient:
+    """Production-safe client for gateways exposing OpenAI-compatible APIs."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        base_url: object | None,
+        api_key: str | None,
+        max_retries: int,
+        provider_name: str,
+        not_configured_code: str,
+    ) -> None:
         self.settings = settings or get_settings()
-        if not self.settings.gateway_base_url or not self.settings.gateway_api_key:
+        self.provider_name = provider_name
+        if not base_url or not api_key:
             raise AppError(
-                "GenAI Hub gateway is not configured",
+                f"{provider_name} is not configured",
                 status_code=503,
-                code="genaihub_not_configured",
+                code=not_configured_code,
             )
         self.client = OpenAI(
-            api_key=self.settings.gateway_api_key,
-            base_url=str(self.settings.gateway_base_url).rstrip("/"),
+            api_key=api_key,
+            base_url=str(base_url).rstrip("/"),
             http_client=self._build_http_client(),
-            max_retries=self.settings.gateway_max_retries,
+            max_retries=max_retries,
         )
 
     def _build_http_client(self) -> httpx.Client:
@@ -113,3 +123,42 @@ class GenAIHubClient:
             input=sanitized_input,
         )
         return [item.embedding for item in response.data]
+
+
+class GenAIHubClient(OpenAICompatibleGatewayClient):
+    """Production-safe OpenAI-compatible client for the GenAI Hub gateway."""
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        settings = settings or get_settings()
+        super().__init__(
+            settings=settings,
+            base_url=settings.gateway_base_url,
+            api_key=settings.gateway_api_key,
+            max_retries=settings.gateway_max_retries,
+            provider_name="GenAI Hub gateway",
+            not_configured_code="genaihub_not_configured",
+        )
+
+
+class AnthropicGatewayClient(OpenAICompatibleGatewayClient):
+    """OpenAI-compatible client for the Anthropic-named inference gateway."""
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        settings = settings or get_settings()
+        super().__init__(
+            settings=settings,
+            base_url=_anthropic_openai_base_url(settings.anthropic_base_url),
+            api_key=settings.anthropic_auth_token,
+            max_retries=settings.gateway_max_retries,
+            provider_name="Anthropic inference gateway",
+            not_configured_code="anthropic_gateway_not_configured",
+        )
+
+
+def _anthropic_openai_base_url(base_url: object | None) -> str | None:
+    if not base_url:
+        return None
+    normalized = str(base_url).rstrip("/")
+    if normalized.endswith("/v1"):
+        return normalized
+    return f"{normalized}/v1"
