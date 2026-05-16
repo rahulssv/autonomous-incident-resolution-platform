@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Autonomous Incident Resolution Platform Command Center</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Platform Operations</p>
+          <h1>Autonomous Incident Resolution</h1>
+        </div>
+        <div class="run-state" id="runState">Awaiting Detection</div>
+      </header>
+
+      <section class="control-strip" aria-label="Detected incident controls">
+        <label>
+          <span>Detected Error</span>
+          <select id="scenario">
+            <option value="crashloop">CrashLoopBackOff</option>
+            <option value="oom">OOMKilled</option>
+            <option value="latency">Latency spike</option>
+          </select>
+        </label>
+        <label>
+          <span>Severity</span>
+          <select id="severity">
+            <option value="critical">Critical</option>
+            <option value="warning">Warning</option>
+            <option value="info">Info</option>
+          </select>
+        </label>
+        <label class="title-field">
+          <span>Incident</span>
+          <input
+            id="title"
+            type="text"
+            maxlength="120"
+            placeholder="CrashLoopBackOff in payment service"
+          />
+        </label>
+        <button id="startRun" type="button">Resolve Incident</button>
+      </section>
+
+      <section class="dashboard">
+        <aside class="stage-panel" aria-label="Incident resolution lifecycle">
+          <div class="panel-heading">
+            <p class="eyebrow">Resolution</p>
+            <h2>Lifecycle</h2>
+          </div>
+          <ol id="stageList" class="stage-list"></ol>
+        </aside>
+
+        <section class="workbench">
+          <div class="detection-card">
+            <div>
+              <p class="eyebrow">Detection</p>
+              <h2 id="detectionTitle">No actionable error identified</h2>
+              <p id="detectionSource" class="muted-line">
+                AKS logs and events are monitored for incident signals.
+              </p>
+            </div>
+            <div class="signal-facts">
+              <span id="detectionSignal">No signal</span>
+              <span id="detectionRoute">aks.kubeevents.raw</span>
+              <span id="detectionConfidence">Classifier ready</span>
+            </div>
+          </div>
+
+          <div class="incident-card">
+            <div>
+              <p class="eyebrow">Incident</p>
+              <h2 id="incidentTitle">Awaiting detected incident</h2>
+            </div>
+            <div class="incident-meta">
+              <span id="incidentId">-</span>
+              <span id="incidentSeverity">-</span>
+              <span id="incidentStatus">-</span>
+            </div>
+          </div>
+
+          <div class="agent-grid">
+            <article class="agent-output">
+              <div class="panel-heading">
+                <p class="eyebrow">Current Phase</p>
+                <h2 id="activeStage">No active phase</h2>
+              </div>
+              <p id="stageSummary" class="summary">
+                Resolution details will appear here after an error is detected.
+              </p>
+              <dl class="metrics">
+                <div>
+                  <dt>Timeline</dt>
+                  <dd id="metricEvents">0</dd>
+                </div>
+                <div>
+                  <dt>Evidence</dt>
+                  <dd id="metricTools">0</dd>
+                </div>
+                <div>
+                  <dt>AI Calls</dt>
+                  <dd id="metricModels">0</dd>
+                </div>
+              </dl>
+            </article>
+
+            <article class="agent-output">
+              <div class="panel-heading">
+                <p class="eyebrow">RCA</p>
+                <h2>Hypothesis</h2>
+              </div>
+              <p id="rcaHypothesis" class="summary">
+                RCA output will appear after runtime evidence is collected.
+              </p>
+              <div id="evidenceRefs" class="chip-row"></div>
+            </article>
+
+            <article class="agent-output wide">
+              <div class="panel-heading">
+                <p class="eyebrow">Documentation</p>
+                <h2>Resolution Record</h2>
+              </div>
+              <div id="documentationDraft" class="doc-preview">
+                No resolution record yet.
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <aside class="event-panel" aria-label="Incident resolution timeline">
+          <div class="panel-heading">
+            <p class="eyebrow">Audit</p>
+            <h2>Timeline</h2>
+          </div>
+          <div id="eventLog" class="event-log"></div>
+        </aside>
+      </section>
+    </main>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

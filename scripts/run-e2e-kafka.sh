@@ -5,7 +5,10 @@ RUN_ID="$(date -u +%Y%m%d%H%M%S)-$$"
 TEMPORAL_CONTAINER="airp-e2e-temporal-worker-${RUN_ID}"
 ALERT_CONTAINER="airp-e2e-alert-consumer-${RUN_ID}"
 E2E_CONSUMER_GROUP="${AIRP_E2E_CONSUMER_GROUP:-airp-e2e-alert-consumer-${RUN_ID}}"
+E2E_TEMPORAL_TASK_QUEUE="${AIRP_E2E_TEMPORAL_TASK_QUEUE:-${AIRP_TEMPORAL_TASK_QUEUE:-airp-e2e-workflows-${RUN_ID}}}"
 CORE_SERVICES=(postgres redis temporal kubernetes-mcp github-mcp)
+
+export AIRP_TEMPORAL_TASK_QUEUE="${E2E_TEMPORAL_TASK_QUEUE}"
 
 cleanup() {
   local status=$1
@@ -68,6 +71,7 @@ if [[ "${AIRP_E2E_MIGRATE:-1}" == "1" ]]; then
 fi
 
 echo "[airp-e2e] Starting API"
+echo "[airp-e2e] Using Temporal task queue: ${AIRP_TEMPORAL_TASK_QUEUE}"
 docker compose up -d api
 
 echo "[airp-e2e] Starting temporary Temporal worker: ${TEMPORAL_CONTAINER}"
