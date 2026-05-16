@@ -225,6 +225,32 @@ class GitHubMCPClient:
         self._record_response_messages(payload)
         return item_list(payload, "changed_files", "files", "items")
 
+    async def lookup_file_commits(
+        self,
+        repository_url: str,
+        *,
+        path: str,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        if self.fixture is not None:
+            if not self._matches_repository(repository_url):
+                return []
+            return [
+                commit.model_dump(mode="json")
+                for commit in self.fixture.commits
+                if any(changed_file.path == path for changed_file in commit.changed_files)
+            ][:limit]
+        payload = await self._call_tool(
+            "github.lookup_file_commits",
+            {
+                "repository_url": repository_url,
+                "path": path,
+                "limit": limit,
+            },
+        )
+        self._record_response_messages(payload)
+        return item_list(payload, "commits", "items")
+
     async def lookup_releases(
         self,
         repository_url: str,
@@ -446,11 +472,33 @@ class GitHubMCPClient:
         return issue
 
     async def create_pull_request(self, repository: str, payload: dict[str, Any]) -> dict[str, Any]:
-        _ = repository, payload
-        raise NotImplementedError(
-            "GitHub pull request creation remains disabled until approval and "
-            "policy gates are implemented"
-        )
+        if self.fixture is not None:
+            marker = payload.get("idempotency_marker")
+            return {
+                "number": 10000,
+                "title": payload.get("title") or "AIRP remediation",
+                "url": f"{repository.rstrip('/')}/pull/10000",
+                "author": "airp-local",
+                "head": payload.get("branch"),
+                "base": payload.get("base") or self.fixture.default_branch,
+                "assignees": payload.get("assignees") or [],
+                "changed_files": payload.get("files") or [],
+                "existing": False,
+                "raw": {
+                    "html_url": f"{repository.rstrip('/')}/pull/10000",
+                    "fixture": True,
+                    "idempotency_marker": marker,
+                },
+            }
+        tool_payload = {"repository_url": repository, **payload}
+        response = await self._call_tool("github.create_pull_request", tool_payload)
+        self._record_response_messages(response)
+        pull_request = optional_dict(response, "pull_request", "pr", "item")
+        if pull_request is None:
+            raise ValueError(
+                "GitHub MCP create pull request response did not include a pull request"
+            )
+        return pull_request
 
     def _matches_repository(self, repository_url: str) -> bool:
         return self.fixture is None or not self.fixture.repository_url or (

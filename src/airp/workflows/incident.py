@@ -115,6 +115,28 @@ class IncidentWorkflow:
                 {"step": "slack_notification_sent"},
             )
 
+        remediation_pr_result = await self._create_remediation_pr()
+        self.state.current_step = (
+            f"remediation_pr_{remediation_pr_result.get('status', 'unknown')}"
+        )
+        if remediation_pr_result.get("status") == "created":
+            self.state.status = IncidentStatus.PR_CREATED.value
+            await self._update_status(
+                IncidentStatus.PR_CREATED.value,
+                "Remediation pull request was created for the RCA.",
+                {
+                    "pull_request_url": remediation_pr_result.get("pull_request_url"),
+                    "repository_url": remediation_pr_result.get("repository_url"),
+                    "branch": remediation_pr_result.get("branch"),
+                    "assignee": remediation_pr_result.get("assignee"),
+                    "existing": remediation_pr_result.get("existing"),
+                },
+            )
+            await self._record_workflow_event(
+                "workflow.step.completed",
+                {"step": "remediation_pr_created"},
+            )
+
         while not self.state.completed:
             await workflow.wait_condition(lambda: bool(self._signals))
             signal = self._signals.pop(0)
@@ -277,6 +299,17 @@ class IncidentWorkflow:
             return {"status": "skipped", "reason": "workflow state is unavailable"}
         result = await workflow.execute_activity(
             "incident_send_slack_notification",
+            args=[self.state.incident_id],
+            start_to_close_timeout=EXTERNAL_ACTION_ACTIVITY_TIMEOUT,
+            retry_policy=ACTIVITY_RETRY_POLICY,
+        )
+        return dict(result or {})
+
+    async def _create_remediation_pr(self) -> dict[str, Any]:
+        if self.state is None:
+            return {"status": "skipped", "reason": "workflow state is unavailable"}
+        result = await workflow.execute_activity(
+            "incident_create_remediation_pr",
             args=[self.state.incident_id],
             start_to_close_timeout=EXTERNAL_ACTION_ACTIVITY_TIMEOUT,
             retry_policy=ACTIVITY_RETRY_POLICY,

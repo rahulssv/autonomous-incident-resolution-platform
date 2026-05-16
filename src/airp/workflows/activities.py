@@ -284,6 +284,200 @@ async def incident_send_slack_notification(incident_id: str) -> dict[str, Any]:
             return {"status": "failed", "reason": error, "channel": channel}
 
 
+@activity.defn(name="incident_create_remediation_pr")
+async def incident_create_remediation_pr(incident_id: str) -> dict[str, Any]:
+    settings = get_settings()
+    policy = ExternalActionPolicy(settings).remediation_pr_creation()
+    async with AsyncSessionLocal() as session:
+        service = IncidentService(session)
+        incident = await service.get_incident(incident_id)
+
+        if not policy.allowed:
+            await _record_external_action_skipped(
+                service,
+                incident_id,
+                "github.pull_request.skipped",
+                policy.reason,
+            )
+            return {"status": "skipped", "reason": policy.reason}
+
+        repository_url = await _github_repository_for_incident(session, incident, settings)
+        if not repository_url:
+            reason = "No GitHub repository could be resolved for remediation PR creation"
+            await _record_external_action_failed(
+                service,
+                incident_id,
+                "github.pull_request.failed",
+                reason,
+            )
+            return {"status": "failed", "reason": reason}
+
+        if not is_github_repository_allowed(
+            repository_url,
+            settings.github_mcp_repository_allowlist,
+        ):
+            reason = "Resolved GitHub repository is outside the configured allowlist"
+            await _record_external_action_failed(
+                service,
+                incident_id,
+                "github.pull_request.failed",
+                reason,
+                {"repository_url": repository_url},
+            )
+            return {"status": "failed", "reason": reason, "repository_url": repository_url}
+
+        remediation_plans = await service.list_remediation_plans(incident_id, limit=1)
+        if not remediation_plans:
+            reason = "No remediation plan was available for PR creation"
+            await _record_external_action_failed(
+                service,
+                incident_id,
+                "github.pull_request.failed",
+                reason,
+                {"repository_url": repository_url},
+            )
+            return {"status": "failed", "reason": reason, "repository_url": repository_url}
+
+        client = GitHubMCPClient(
+            transport=settings.github_mcp_transport,
+            endpoint_url=str(settings.github_mcp_url) if settings.github_mcp_url else None,
+            timeout_seconds=settings.github_mcp_read_timeout_seconds,
+        )
+        marker = f"AIRP-PR-INCIDENT-ID-{incident_id}"
+        branch = f"airp/remediation/{incident_id[:8]}"
+        evidence_items = await service.list_evidence(incident_id, limit=20)
+        hypotheses = await service.list_rca_hypotheses(incident_id, limit=1)
+        reports = await service.list_documentation_reports(incident_id, limit=1)
+        candidate_files = _github_candidate_files(evidence_items)
+        assignee = None
+        assignee_source = None
+
+        try:
+            repository = await client.get_repository(repository_url)
+            base_branch = _first_string(
+                repository.get("default_branch") if repository else None,
+                "main",
+            )
+            assignee, assignee_source = await _github_pr_assignee(
+                client,
+                repository_url,
+                candidate_files,
+            )
+            file_path = f".airp/remediations/{incident_id}.md"
+            file_content = _remediation_pr_file_content(
+                incident,
+                remediation_plans[0],
+                hypotheses[0] if hypotheses else None,
+                reports[0] if reports else None,
+                evidence_items,
+                issue_url=incident.github_issue_url,
+                assignee=assignee,
+                assignee_source=assignee_source,
+            )
+            payload = {
+                "base": base_branch,
+                "branch": branch,
+                "title": _remediation_pr_title(incident, marker),
+                "body": _remediation_pr_body(
+                    incident,
+                    remediation_plans[0],
+                    issue_url=incident.github_issue_url,
+                    marker=marker,
+                    changed_files=[file_path],
+                    assignee=assignee,
+                    assignee_source=assignee_source,
+                ),
+                "files": [
+                    {
+                        "path": file_path,
+                        "content": file_content,
+                        "message": f"AIRP remediation plan for incident {incident_id}",
+                    }
+                ],
+                "assignees": [assignee] if assignee else [],
+                "idempotency_marker": marker,
+            }
+            pull_request = await client.create_pull_request(repository_url, payload)
+            pr_url = _github_pull_request_url(pull_request)
+            if not pr_url:
+                raise ValueError("GitHub MCP pull request response did not include a PR URL")
+
+            external_id = _github_pull_request_number(pull_request)
+            await service.add_tool_call(
+                incident_id,
+                tool_server="github_mcp",
+                tool_name="github.create_pull_request",
+                parameters={
+                    "repository_url": repository_url,
+                    "base": base_branch,
+                    "branch": branch,
+                    "title": payload["title"],
+                    "changed_files": [file_path],
+                    "assignees": payload["assignees"],
+                    "idempotency_marker": marker,
+                },
+                result={
+                    "status": "existing" if pull_request.get("existing") else "created",
+                    "pull_request_url": pr_url,
+                    "external_id": external_id,
+                    "assignment_error": pull_request.get("assignment_error"),
+                },
+            )
+            await service.record_github_pull_request(
+                incident_id,
+                repository_url=repository_url,
+                artifact_url=pr_url,
+                external_id=external_id,
+                github_issue_url=incident.github_issue_url,
+                metadata={
+                    "title": payload["title"],
+                    "branch": branch,
+                    "base": base_branch,
+                    "changed_files": [file_path],
+                    "assignees": payload["assignees"],
+                    "assignee_source": assignee_source,
+                    "github_issue_url": incident.github_issue_url,
+                    "idempotency_marker": marker,
+                    "existing": bool(pull_request.get("existing")),
+                    "assignment_error": pull_request.get("assignment_error"),
+                },
+            )
+            return {
+                "status": "created",
+                "repository_url": repository_url,
+                "pull_request_url": pr_url,
+                "external_id": external_id,
+                "branch": branch,
+                "assignee": assignee,
+                "assignee_source": assignee_source,
+                "existing": bool(pull_request.get("existing")),
+            }
+        except Exception as exc:  # noqa: BLE001 - external action failure is recorded
+            error = _safe_error(exc)
+            await service.add_tool_call(
+                incident_id,
+                tool_server="github_mcp",
+                tool_name="github.create_pull_request",
+                parameters={
+                    "repository_url": repository_url,
+                    "branch": branch,
+                    "assignee": assignee,
+                    "assignee_source": assignee_source,
+                    "idempotency_marker": marker,
+                },
+                result={"status": "failed"},
+                error=error,
+            )
+            await _record_external_action_failed(
+                service,
+                incident_id,
+                "github.pull_request.failed",
+                error,
+                {"repository_url": repository_url, "branch": branch},
+            )
+            return {"status": "failed", "reason": error, "repository_url": repository_url}
+
+
 async def _github_repository_for_incident(
     session,
     incident: Incident,
@@ -615,6 +809,217 @@ def _github_issue_url(issue: dict[str, Any]) -> str | None:
 def _github_issue_number(issue: dict[str, Any]) -> str | None:
     value = issue.get("number")
     return str(value) if value is not None else None
+
+
+def _github_pull_request_url(pull_request: dict[str, Any]) -> str | None:
+    raw = pull_request.get("raw") if isinstance(pull_request.get("raw"), dict) else {}
+    return _first_string(
+        pull_request.get("url"),
+        pull_request.get("html_url"),
+        raw.get("html_url"),
+    )
+
+
+def _github_pull_request_number(pull_request: dict[str, Any]) -> str | None:
+    value = pull_request.get("number")
+    return str(value) if value is not None else None
+
+
+def _remediation_pr_title(incident: Incident, marker: str) -> str:
+    service_name = _incident_service_name(incident)
+    suffix = f" [{marker}]"
+    base = f"[AIRP] Remediation for {service_name}: {incident.title}"
+    return f"{_truncate(base, 240 - len(suffix))}{suffix}"
+
+
+def _remediation_pr_body(
+    incident: Incident,
+    remediation_plan: Any,
+    *,
+    issue_url: str | None,
+    marker: str,
+    changed_files: list[str],
+    assignee: str | None,
+    assignee_source: str | None,
+) -> str:
+    issue_reference = issue_url or "unavailable"
+    lines = [
+        f"<!-- {marker} -->",
+        "# AIRP Remediation PR",
+        "",
+        f"Related RCA issue: {issue_reference}",
+        f"Incident ID: `{incident.id}`",
+        f"Severity: `{incident.severity}`",
+        "",
+        "## Remediation",
+        _truncate(remediation_plan.plan_summary, 2000),
+        "",
+        "## Test Plan",
+        _truncate(remediation_plan.test_plan or "No test plan was persisted.", 1200),
+        "",
+        "## Rollback Plan",
+        _truncate(remediation_plan.rollback_plan or "No rollback plan was persisted.", 1200),
+        "",
+        "## Files Changed",
+    ]
+    lines.extend(f"- `{path}`" for path in changed_files)
+    lines.extend(
+        [
+            "",
+            "## Assignment",
+            (
+                f"Assigned to `{assignee}` based on `{assignee_source}`."
+                if assignee
+                else "No eligible GitHub assignee could be resolved automatically."
+            ),
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _remediation_pr_file_content(
+    incident: Incident,
+    remediation_plan: Any,
+    hypothesis: Any | None,
+    report: Any | None,
+    evidence_items: list[EvidenceItem],
+    *,
+    issue_url: str | None,
+    assignee: str | None,
+    assignee_source: str | None,
+) -> str:
+    root_cause = (
+        hypothesis.hypothesis
+        if hypothesis is not None
+        else "No RCA hypothesis was persisted."
+    )
+    evidence_lines = [
+        f"- {item.evidence_type} from {item.source}: {_truncate(item.summary, 500)}"
+        for item in evidence_items[:8]
+    ]
+    if not evidence_lines:
+        evidence_lines.append("- No persisted evidence was available.")
+
+    lines = [
+        "# AIRP Remediation Plan",
+        "",
+        f"- Incident ID: `{incident.id}`",
+        f"- Severity: `{incident.severity}`",
+        f"- Environment: `{incident.environment}`",
+        f"- RCA issue: {issue_url or 'unavailable'}",
+        f"- Assigned owner candidate: `{assignee}`"
+        if assignee
+        else "- Assigned owner candidate: unavailable",
+        f"- Assignment source: `{assignee_source}`"
+        if assignee_source
+        else "- Assignment source: unavailable",
+        "",
+        "## Root Cause",
+        _truncate(root_cause, 3000),
+        "",
+        "## Proposed Remediation",
+        _truncate(remediation_plan.plan_summary, 3000),
+        "",
+        "## Validation",
+        _truncate(remediation_plan.test_plan or "No test plan was persisted.", 1600),
+        "",
+        "## Rollback",
+        _truncate(remediation_plan.rollback_plan or "No rollback plan was persisted.", 1600),
+        "",
+        "## Evidence",
+        *evidence_lines,
+    ]
+    if report is not None:
+        lines.extend(
+            [
+                "",
+                "## Post-Mortem Draft Summary",
+                _truncate(report.executive_summary, 2000),
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Automation Notes",
+            (
+                "This file was generated by AIRP from the correlated RCA, evidence bundle, "
+                "and remediation plan. Review before merge."
+            ),
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+async def _github_pr_assignee(
+    client: GitHubMCPClient,
+    repository_url: str,
+    candidate_files: list[str],
+) -> tuple[str | None, str | None]:
+    for path in candidate_files[:10]:
+        try:
+            commits = await client.lookup_file_commits(repository_url, path=path, limit=1)
+        except Exception:  # noqa: BLE001 - assignment is best effort
+            continue
+        author = _github_commit_author(commits[0]) if commits else None
+        if author and _is_github_login(author):
+            return author, path
+
+    try:
+        commits = await client.lookup_commits(repository_url, limit=1)
+    except Exception:  # noqa: BLE001 - assignment is best effort
+        return None, None
+    author = _github_commit_author(commits[0]) if commits else None
+    if author and _is_github_login(author):
+        return author, "latest repository commit"
+    return None, None
+
+
+def _github_candidate_files(evidence_items: list[EvidenceItem]) -> list[str]:
+    candidates: list[str] = []
+    for evidence in evidence_items:
+        if evidence.evidence_type != "github":
+            continue
+        candidates.extend(_github_candidate_files_from_payload(evidence.data))
+    return list(dict.fromkeys(path for path in candidates if path))
+
+
+def _github_candidate_files_from_payload(payload: Any) -> list[str]:
+    if isinstance(payload, list):
+        files: list[str] = []
+        for item in payload:
+            files.extend(_github_candidate_files_from_payload(item))
+        return files
+    if not isinstance(payload, dict):
+        return []
+
+    files = []
+    path = _first_string(payload.get("path"), payload.get("filename"))
+    if path:
+        files.append(path)
+    for key in (
+        "changed_files",
+        "files",
+        "items",
+        "commits",
+        "merged_prs",
+        "pull_requests",
+    ):
+        files.extend(_github_candidate_files_from_payload(payload.get(key)))
+    return files
+
+
+def _github_commit_author(commit: dict[str, Any]) -> str | None:
+    raw = commit.get("raw") if isinstance(commit.get("raw"), dict) else {}
+    return _first_string(
+        raw.get("author_login"),
+        raw.get("committer_login"),
+        commit.get("author"),
+        commit.get("committer"),
+    )
+
+
+def _is_github_login(value: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?", value))
 
 
 def _first_string(*values: Any) -> str | None:

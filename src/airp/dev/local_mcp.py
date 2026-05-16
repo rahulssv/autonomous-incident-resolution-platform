@@ -544,11 +544,14 @@ def _github_fixture_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]
         {
             "sha": "localmcp1234567890",
             "message": "Stabilize checkout latency",
-            "author": "AIRP Local MCP",
+            "author": "airp-local",
             "authored_at": "2026-05-16T00:00:00Z",
             "url": f"{repository_url}/commit/localmcp1234567890",
             "changed_files": changed_files,
-            "raw": {"html_url": f"{repository_url}/commit/localmcp1234567890"},
+            "raw": {
+                "html_url": f"{repository_url}/commit/localmcp1234567890",
+                "author_login": "airp-local",
+            },
         }
     ]
     merged_prs = [
@@ -594,6 +597,14 @@ def _github_fixture_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]
             return {"result": {"repository": repo}}
         case "github.lookup_commits":
             return {"result": {"commits": commits}}
+        case "github.lookup_file_commits":
+            path = str(arguments.get("path") or "")
+            matches = [
+                commit
+                for commit in commits
+                if any(item["path"] == path for item in commit["changed_files"])
+            ]
+            return {"result": {"commits": matches or commits}}
         case "github.lookup_commit":
             return {"result": {"commit": commits[0]}}
         case "github.lookup_merged_prs":
@@ -621,6 +632,22 @@ def _github_fixture_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]
                 "raw": {"html_url": f"{repository_url}/issues/9999", "fixture": True},
             }
             return {"result": {"issue": issue}}
+        case "github.create_pull_request":
+            title = str(arguments.get("title") or "AIRP remediation")
+            branch = str(arguments.get("branch") or "airp/remediation/local")
+            pull_request = {
+                "number": 10000,
+                "title": title,
+                "url": f"{repository_url}/pull/10000",
+                "author": "airp-local",
+                "head": branch,
+                "base": str(arguments.get("base") or "main"),
+                "assignees": list(arguments.get("assignees") or []),
+                "changed_files": list(arguments.get("files") or []),
+                "existing": False,
+                "raw": {"html_url": f"{repository_url}/pull/10000", "fixture": True},
+            }
+            return {"result": {"pull_request": pull_request}}
         case _:
             raise HTTPException(status_code=404, detail=f"Unsupported GitHub MCP tool: {tool}")
 
@@ -655,6 +682,15 @@ async def _github_app_tool(tool: str, arguments: dict[str, Any]) -> dict[str, An
                 params["until"] = str(arguments["until"])
             data = await _github_installation_request(
                 "GET", f"/repos/{repo_path}/commits", token, params=params
+            )
+            return {"result": {"commits": [_commit_payload(item) for item in data]}}
+        case "github.lookup_file_commits":
+            path = _required_argument(arguments, "path")
+            data = await _github_installation_request(
+                "GET",
+                f"/repos/{repo_path}/commits",
+                token,
+                params={"path": path, "per_page": limit},
             )
             return {"result": {"commits": [_commit_payload(item) for item in data]}}
         case "github.lookup_commit":
@@ -737,6 +773,9 @@ async def _github_app_tool(tool: str, arguments: dict[str, Any]) -> dict[str, An
                     json_body={"title": title, "body": body},
                 )
             return {"result": {"issue": _issue_payload(data)}}
+        case "github.create_pull_request":
+            pull_request = await _github_create_pull_request(repo_path, token, arguments)
+            return {"result": {"pull_request": pull_request}}
         case _:
             raise HTTPException(status_code=404, detail=f"Unsupported GitHub MCP tool: {tool}")
 
@@ -873,6 +912,195 @@ async def _github_changed_files(
     return files[:limit]
 
 
+async def _github_create_pull_request(
+    repo_path: str,
+    token: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    title = str(arguments.get("title") or "").strip()
+    body = str(arguments.get("body") or "").strip()
+    branch = str(arguments.get("branch") or "").strip()
+    raw_files = arguments.get("files") or []
+    if not title or not body or not branch:
+        raise HTTPException(
+            status_code=400,
+            detail="github.create_pull_request requires title, body, and branch",
+        )
+    if not isinstance(raw_files, list) or not raw_files:
+        raise HTTPException(
+            status_code=400,
+            detail="github.create_pull_request requires at least one file change",
+        )
+
+    repo = await _github_installation_request("GET", f"/repos/{repo_path}", token)
+    base_branch = str(arguments.get("base") or repo.get("default_branch") or "main")
+    existing = await _github_existing_pull_request(repo_path, token, branch)
+    if existing is not None:
+        payload = _pull_request_payload(existing)
+        payload["existing"] = True
+        payload["assignees"] = _assignee_logins(existing.get("assignees") or [])
+        return payload
+
+    await _github_create_branch(repo_path, token, branch, from_branch=base_branch)
+    changed_files = []
+    for file_change in raw_files:
+        if not isinstance(file_change, dict):
+            raise HTTPException(status_code=400, detail="file changes must be objects")
+        path = _required_argument(file_change, "path").strip("/")
+        content = str(file_change.get("content") or "")
+        message = str(file_change.get("message") or f"Update {path}").strip()
+        await _github_upsert_file(
+            repo_path,
+            token,
+            path=path,
+            content=content,
+            message=message,
+            branch=branch,
+        )
+        changed_files.append({"path": path, "status": "modified"})
+
+    existing_created_pr = False
+    try:
+        data = await _github_installation_request(
+            "POST",
+            f"/repos/{repo_path}/pulls",
+            token,
+            json_body={
+                "title": title,
+                "body": body,
+                "head": branch,
+                "base": base_branch,
+                "maintainer_can_modify": True,
+            },
+        )
+    except HTTPException as exc:
+        if exc.status_code != 422:
+            raise
+        existing_pr = await _github_existing_pull_request(repo_path, token, branch)
+        if existing_pr is None:
+            raise
+        data = existing_pr
+        existing_created_pr = True
+
+    assignees = [
+        str(assignee)
+        for assignee in arguments.get("assignees") or []
+        if str(assignee).strip()
+    ]
+    assignment_error = None
+    if assignees:
+        try:
+            assigned = await _github_installation_request(
+                "POST",
+                f"/repos/{repo_path}/issues/{data['number']}/assignees",
+                token,
+                json_body={"assignees": assignees},
+            )
+            assignees = _assignee_logins(assigned.get("assignees") or [])
+        except HTTPException as exc:
+            assignment_error = str(exc.detail)
+
+    payload = _pull_request_payload(data)
+    payload["changed_files"] = changed_files
+    payload["assignees"] = assignees
+    payload["assignment_error"] = assignment_error
+    payload["existing"] = existing_created_pr
+    return payload
+
+
+async def _github_existing_pull_request(
+    repo_path: str,
+    token: str,
+    branch: str,
+) -> dict[str, Any] | None:
+    owner = repo_path.split("/", 1)[0]
+    data = await _github_installation_request(
+        "GET",
+        f"/repos/{repo_path}/pulls",
+        token,
+        params={"head": f"{owner}:{branch}", "state": "open", "per_page": 1},
+    )
+    return data[0] if data else None
+
+
+async def _github_create_branch(
+    repo_path: str,
+    token: str,
+    branch: str,
+    *,
+    from_branch: str,
+) -> dict[str, Any]:
+    source = await _github_installation_request(
+        "GET",
+        f"/repos/{repo_path}/git/ref/heads/{from_branch}",
+        token,
+    )
+    sha = source.get("object", {}).get("sha")
+    if not sha:
+        raise HTTPException(status_code=502, detail="GitHub branch source SHA was unavailable")
+    try:
+        return await _github_installation_request(
+            "POST",
+            f"/repos/{repo_path}/git/refs",
+            token,
+            json_body={"ref": f"refs/heads/{branch}", "sha": sha},
+        )
+    except HTTPException as exc:
+        if exc.status_code != 422:
+            raise
+        return await _github_installation_request(
+            "GET",
+            f"/repos/{repo_path}/git/ref/heads/{branch}",
+            token,
+        )
+
+
+async def _github_get_file(
+    repo_path: str,
+    token: str,
+    *,
+    path: str,
+    ref: str,
+) -> dict[str, Any] | None:
+    try:
+        data = await _github_installation_request(
+            "GET",
+            f"/repos/{repo_path}/contents/{path}",
+            token,
+            params={"ref": ref},
+        )
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return None
+        raise
+    return data if isinstance(data, dict) else None
+
+
+async def _github_upsert_file(
+    repo_path: str,
+    token: str,
+    *,
+    path: str,
+    content: str,
+    message: str,
+    branch: str,
+) -> dict[str, Any]:
+    existing = await _github_get_file(repo_path, token, path=path, ref=branch)
+    payload = {
+        "message": message,
+        "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+        "branch": branch,
+    }
+    if existing and existing.get("sha"):
+        payload["sha"] = existing["sha"]
+    return await _github_installation_request(
+        "PUT",
+        f"/repos/{repo_path}/contents/{path}",
+        token,
+        json_body=payload,
+    )
+
+
 def _repo_payload(item: dict[str, Any]) -> dict[str, Any]:
     owner = item.get("owner") or {}
     owner_login = owner.get("login") if isinstance(owner, dict) else str(owner)
@@ -889,15 +1117,22 @@ def _repo_payload(item: dict[str, Any]) -> dict[str, Any]:
 def _commit_payload(item: dict[str, Any], *, include_files: bool = False) -> dict[str, Any]:
     commit = item.get("commit") or {}
     author = item.get("author") or {}
+    committer = item.get("committer") or {}
     commit_author = commit.get("author") or {}
+    author_login = author.get("login") if isinstance(author, dict) else None
+    committer_login = committer.get("login") if isinstance(committer, dict) else None
     payload = {
         "sha": item.get("sha"),
         "message": commit.get("message"),
-        "author": author.get("login") or commit_author.get("name"),
+        "author": author_login or commit_author.get("name"),
         "authored_at": commit_author.get("date"),
         "url": item.get("html_url"),
         "changed_files": [],
-        "raw": {"html_url": item.get("html_url")},
+        "raw": {
+            "html_url": item.get("html_url"),
+            "author_login": author_login,
+            "committer_login": committer_login,
+        },
     }
     if include_files:
         payload["changed_files"] = [
@@ -920,6 +1155,8 @@ def _changed_file_payload(item: dict[str, Any]) -> dict[str, Any]:
 
 def _pull_request_payload(item: dict[str, Any]) -> dict[str, Any]:
     user = item.get("user") or {}
+    head = item.get("head") if isinstance(item.get("head"), dict) else {}
+    base = item.get("base") if isinstance(item.get("base"), dict) else {}
     return {
         "number": item.get("number"),
         "title": item.get("title"),
@@ -927,6 +1164,9 @@ def _pull_request_payload(item: dict[str, Any]) -> dict[str, Any]:
         "author": user.get("login") if isinstance(user, dict) else None,
         "merged_at": item.get("closed_at"),
         "merge_commit_sha": None,
+        "head": head.get("ref"),
+        "base": base.get("ref"),
+        "assignees": _assignee_logins(item.get("assignees") or []),
         "changed_files": [],
         "raw": {"html_url": item.get("html_url")},
     }
@@ -960,6 +1200,16 @@ def _issue_payload(item: dict[str, Any]) -> dict[str, Any]:
 
 def _branch_payload(item: dict[str, Any]) -> dict[str, Any]:
     return {"name": item.get("name"), "protected": item.get("protected", False)}
+
+
+def _assignee_logins(items: list[Any]) -> list[str]:
+    logins = []
+    for item in items:
+        if isinstance(item, dict) and item.get("login"):
+            logins.append(str(item["login"]))
+        elif isinstance(item, str) and item:
+            logins.append(item)
+    return logins
 
 
 def _github_error(response: httpx.Response) -> str:

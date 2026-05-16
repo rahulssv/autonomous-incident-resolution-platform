@@ -439,6 +439,94 @@ async def test_github_mcp_creates_issue_through_mcp_tool() -> None:
 
 
 @pytest.mark.asyncio
+async def test_github_mcp_creates_pull_request_through_mcp_tool() -> None:
+    seen_arguments: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body["tool"] == "github.create_pull_request"
+        seen_arguments.update(body["arguments"])
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "pull_request": {
+                        "number": 456,
+                        "title": body["arguments"]["title"],
+                        "url": "https://github.com/AIRP-client/checkout-api/pull/456",
+                        "head": body["arguments"]["branch"],
+                        "base": body["arguments"]["base"],
+                        "assignees": body["arguments"]["assignees"],
+                    }
+                }
+            },
+        )
+
+    client = GitHubMCPClient(
+        transport="mcp",
+        endpoint_url="https://github-mcp.example",
+        http_transport=httpx.MockTransport(handler),
+    )
+
+    pull_request = await client.create_pull_request(
+        "https://github.com/AIRP-client/checkout-api",
+        {
+            "title": "AIRP remediation",
+            "body": "RCA fix",
+            "branch": "airp/remediation/inc-123",
+            "base": "main",
+            "files": [{"path": ".airp/remediations/inc-123.md", "content": "body"}],
+            "assignees": ["rahulssv"],
+        },
+    )
+
+    assert pull_request["number"] == 456
+    assert pull_request["url"].endswith("/pull/456")
+    assert seen_arguments["repository_url"] == "https://github.com/AIRP-client/checkout-api"
+    assert seen_arguments["assignees"] == ["rahulssv"]
+
+
+@pytest.mark.asyncio
+async def test_github_mcp_looks_up_file_commits_through_mcp_tool() -> None:
+    seen_arguments: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body["tool"] == "github.lookup_file_commits"
+        seen_arguments.update(body["arguments"])
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "commits": [
+                        {
+                            "sha": "abc123",
+                            "author": "rahulssv",
+                            "raw": {"author_login": "rahulssv"},
+                        }
+                    ]
+                }
+            },
+        )
+
+    client = GitHubMCPClient(
+        transport="mcp",
+        endpoint_url="https://github-mcp.example",
+        http_transport=httpx.MockTransport(handler),
+    )
+
+    commits = await client.lookup_file_commits(
+        "https://github.com/AIRP-client/checkout-api",
+        path="src/checkout/api.py",
+        limit=1,
+    )
+
+    assert commits[0]["author"] == "rahulssv"
+    assert seen_arguments["path"] == "src/checkout/api.py"
+    assert seen_arguments["limit"] == 1
+
+
+@pytest.mark.asyncio
 async def test_github_mcp_finds_issue_by_idempotency_marker_in_body() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode())

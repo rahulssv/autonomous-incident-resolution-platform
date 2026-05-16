@@ -10,6 +10,7 @@ from airp.core.logging import configure_logging, get_logger
 from airp.workflows.activities import (
     agent_graph_run,
     incident_create_github_issue,
+    incident_create_remediation_pr,
     incident_record_workflow_event,
     incident_send_slack_notification,
     incident_update_status,
@@ -34,6 +35,7 @@ async def _run() -> None:
             agent_graph_run,
             incident_create_github_issue,
             incident_send_slack_notification,
+            incident_create_remediation_pr,
         ],
     )
 

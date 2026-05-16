@@ -51,11 +51,14 @@ DEFAULT_REQUIRED_EVENTS = (
     "workflow.step.completed",
     "github.issue.created",
     "slack.notification.sent",
+    "github.pull_request.created",
 )
 EMBEDDING_STEP_EVENTS = {"embedding.generated", "embedding.skipped"}
 EXTERNAL_ACTION_TERMINAL_FAILURES = {
     "github.issue.failed",
     "github.issue.skipped",
+    "github.pull_request.failed",
+    "github.pull_request.skipped",
     "slack.notification.failed",
     "slack.notification.skipped",
 }
@@ -375,7 +378,7 @@ async def _wait_for_e2e_result(
                 snapshot.counts["hypotheses"] >= 1
                 and snapshot.counts["remediation_plans"] >= 1
                 and snapshot.counts["documentation_reports"] >= 1
-                and snapshot.counts["github_artifacts"] >= 1
+                and snapshot.counts["github_artifacts"] >= 2
                 and snapshot.counts["slack_messages"] >= 1
                 and (snapshot.counts["evidence"] >= 1 or not require_evidence)
             )
@@ -530,8 +533,8 @@ def _print_progress(
         artifact_gaps.append("remediation_plans")
     if snapshot.counts["documentation_reports"] < 1:
         artifact_gaps.append("documentation_reports")
-    if snapshot.counts["github_artifacts"] < 1:
-        artifact_gaps.append("github_artifacts")
+    if snapshot.counts["github_artifacts"] < 2:
+        artifact_gaps.append("github_artifacts>=2")
     if snapshot.counts["slack_messages"] < 1:
         artifact_gaps.append("slack_messages")
     if require_evidence and snapshot.counts["evidence"] < 1:

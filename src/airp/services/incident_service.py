@@ -21,7 +21,7 @@ from airp.db.models.incident import (
     SlackMessage,
     ToolCall,
 )
-from airp.domain.enums import IncidentStatus
+from airp.domain.enums import IncidentStatus, RemediationStatus
 from airp.schemas.incidents import (
     DocumentationReportCreate,
     EvidenceItemCreate,
@@ -473,6 +473,55 @@ class IncidentService:
                     "repository_url": repository_url,
                     "artifact_url": artifact_url,
                     "external_id": external_id,
+                    **metadata,
+                },
+            )
+        )
+        await self.session.commit()
+        await self.session.refresh(artifact)
+        return artifact
+
+    async def record_github_pull_request(
+        self,
+        incident_id: str,
+        *,
+        repository_url: str,
+        artifact_url: str,
+        external_id: str | None,
+        github_issue_url: str | None,
+        metadata: dict[str, Any],
+    ) -> GitHubArtifact:
+        await self.get_incident(incident_id)
+        plan = await self.session.scalar(
+            select(RemediationPlan)
+            .where(RemediationPlan.incident_id == incident_id)
+            .order_by(RemediationPlan.created_at.desc())
+            .limit(1)
+        )
+        if plan is not None:
+            plan.github_issue_url = github_issue_url
+            plan.github_pr_url = artifact_url
+            plan.status = RemediationStatus.PR_CREATED.value
+
+        artifact = GitHubArtifact(
+            incident_id=incident_id,
+            artifact_type="pull_request",
+            repository_url=repository_url,
+            artifact_url=artifact_url,
+            external_id=external_id,
+            extra=metadata,
+        )
+        self.session.add(artifact)
+        self.session.add(
+            IncidentEvent(
+                incident_id=incident_id,
+                event_type="github.pull_request.created",
+                producer="github-mcp",
+                payload={
+                    "repository_url": repository_url,
+                    "artifact_url": artifact_url,
+                    "external_id": external_id,
+                    "github_issue_url": github_issue_url,
                     **metadata,
                 },
             )
