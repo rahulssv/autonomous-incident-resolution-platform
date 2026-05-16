@@ -174,6 +174,34 @@ async def test_embedding_agent_redacts_text_before_embedding() -> None:
     assert update["embedding_run"]["vector_count"] == len(input_text)
 
 
+async def test_embedding_agent_includes_remediation_and_documentation_summaries() -> None:
+    client = FakeEmbeddingClient()
+    agent = EmbeddingAgent(settings=Settings(llm_embedding_model="embeddings"), embedder=client)
+    state = rca_ready_state()
+    state["remediation_result"] = {
+        "plan_summary": "Prepare a timeout fix after approval.",
+        "test_plan": "Run checkout latency regression tests.",
+        "rollback_plan": "Roll back to the last healthy Docker image.",
+        "recommended_actions": ["review_timeout_change", "run_checkout_tests"],
+    }
+    state["documentation_report"] = {
+        "executive_summary": "Checkout latency increased after a timeout change.",
+        "root_cause_summary": "Timeout configuration likely caused the incident.",
+        "evidence_summary": "GitHub and Kubernetes evidence were reviewed.",
+        "remediation_summary": "Use an approval-gated timeout fix.",
+        "follow_up_tasks": ["add_latency_test"],
+    }
+
+    update = await agent(state)
+
+    input_text, _ = client.inputs[0]
+    joined = " ".join(input_text)
+    assert "Prepare a timeout fix after approval." in joined
+    assert "Checkout latency increased after a timeout change." in joined
+    assert "Documentation follow-ups: add_latency_test" in joined
+    assert update["embedding_run"]["vector_count"] == len(input_text)
+
+
 async def test_correlation_agent_uses_service_and_workload_context() -> None:
     state = sample_state()
     state["monitoring_assessment"] = {

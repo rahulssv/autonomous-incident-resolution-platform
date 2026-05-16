@@ -4,6 +4,7 @@ from fastapi import APIRouter, Query, status
 
 from airp.api.deps import CurrentPrincipal, DbSession
 from airp.schemas.incidents import (
+    DocumentationReportRead,
     EvidenceItemCreate,
     EvidenceItemRead,
     IncidentCreate,
@@ -229,3 +230,35 @@ async def create_remediation_plan(
 ) -> RemediationPlanRead:
     plan = await IncidentService(session).create_remediation_plan(incident_id, payload)
     return RemediationPlanRead.model_validate(plan)
+
+
+@router.get("/{incident_id}/remediation-plans", response_model=list[RemediationPlanRead])
+async def list_remediation_plans(
+    incident_id: str,
+    session: DbSession,
+    _: CurrentPrincipal,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[RemediationPlanRead]:
+    plans = await IncidentService(session).list_remediation_plans(
+        incident_id,
+        limit=limit,
+        offset=offset,
+    )
+    return [RemediationPlanRead.model_validate(plan) for plan in plans]
+
+
+@router.get("/{incident_id}/documentation-reports", response_model=list[DocumentationReportRead])
+async def list_documentation_reports(
+    incident_id: str,
+    session: DbSession,
+    _: CurrentPrincipal,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[DocumentationReportRead]:
+    reports = await IncidentService(session).list_documentation_reports(
+        incident_id,
+        limit=limit,
+        offset=offset,
+    )
+    return [DocumentationReportRead.model_validate(report) for report in reports]

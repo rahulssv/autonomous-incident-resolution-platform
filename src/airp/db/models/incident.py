@@ -105,6 +105,26 @@ class RemediationPlan(IdMixin, TimestampMixin, Base):
     extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
 
 
+class DocumentationReport(IdMixin, TimestampMixin, Base):
+    __tablename__ = "documentation_reports"
+
+    incident_id: Mapped[str] = mapped_column(ForeignKey("incidents.id"), index=True)
+    title: Mapped[str] = mapped_column(String(240))
+    status: Mapped[str] = mapped_column(String(80), default="draft", index=True)
+    executive_summary: Mapped[str] = mapped_column(Text)
+    root_cause_summary: Mapped[str] = mapped_column(Text)
+    impact_summary: Mapped[str] = mapped_column(Text)
+    evidence_summary: Mapped[str] = mapped_column(Text)
+    remediation_summary: Mapped[str] = mapped_column(Text)
+    follow_up_tasks: Mapped[list[str]] = mapped_column(JSON, default=list)
+    source_refs: Mapped[list[str]] = mapped_column(JSON, default=list)
+    publish_recommended: Mapped[bool] = mapped_column(Boolean, default=False)
+    publishing_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    published_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    extra: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+
+
 class Approval(IdMixin, TimestampMixin, Base):
     __tablename__ = "approvals"
 

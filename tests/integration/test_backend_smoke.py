@@ -1,7 +1,11 @@
 from airp.domain.enums import IncidentStatus
 from airp.main import create_app
 from airp.schemas.catalog import ServiceCreate
-from airp.schemas.incidents import IncidentCreate, IncidentSignal
+from airp.schemas.incidents import (
+    DocumentationReportCreate,
+    IncidentCreate,
+    IncidentSignal,
+)
 
 
 def test_app_registers_expected_routes() -> None:
@@ -16,6 +20,8 @@ def test_app_registers_expected_routes() -> None:
     assert "/api/incidents/{incident_id}/tool-calls" in paths
     assert "/api/incidents/{incident_id}/hypotheses" in paths
     assert "/api/incidents/{incident_id}/model-calls" in paths
+    assert "/api/incidents/{incident_id}/remediation-plans" in paths
+    assert "/api/incidents/{incident_id}/documentation-reports" in paths
     assert "/api/services" in paths
     assert "/api/repositories" in paths
     assert "/api/workloads" in paths
@@ -57,3 +63,27 @@ def test_incident_schema_tracks_aks_and_image_context() -> None:
     assert incident.severity == "critical"
     assert incident.image_digest == "sha256:abc"
     assert signal.status == IncidentStatus.WAITING_FOR_APPROVAL
+
+
+def test_documentation_report_schema_tracks_publish_policy_metadata() -> None:
+    report = DocumentationReportCreate(
+        title="RCA Draft: Checkout latency spike",
+        executive_summary="Checkout latency increased after a timeout change.",
+        root_cause_summary="Timeout configuration likely caused the incident.",
+        impact_summary="Critical checkout latency degraded.",
+        evidence_summary="GitHub and Kubernetes evidence were reviewed.",
+        remediation_summary="Use an approval-gated timeout fix.",
+        follow_up_tasks=["add_latency_regression_test"],
+        source_refs=["github", "kubernetes"],
+        publish_recommended=True,
+        publishing_enabled=False,
+        confidence=0.82,
+        metadata={"source": "langgraph.documentation"},
+    )
+
+    payload = report.model_dump(mode="json")
+
+    assert payload["status"] == "draft"
+    assert payload["publish_recommended"] is True
+    assert payload["publishing_enabled"] is False
+    assert payload["metadata"]["source"] == "langgraph.documentation"

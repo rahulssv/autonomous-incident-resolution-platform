@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from airp.core.errors import NotFoundError
 from airp.db.models.incident import (
+    DocumentationReport,
     EvidenceItem,
     Incident,
     IncidentEvent,
@@ -19,6 +20,7 @@ from airp.db.models.incident import (
 )
 from airp.domain.enums import IncidentStatus
 from airp.schemas.incidents import (
+    DocumentationReportCreate,
     EvidenceItemCreate,
     IncidentCreate,
     IncidentEventCreate,
@@ -314,6 +316,32 @@ class IncidentService:
             select(RemediationPlan)
             .where(RemediationPlan.incident_id == incident_id)
             .order_by(RemediationPlan.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self.session.scalars(stmt)).all())
+
+    async def create_documentation_report(
+        self,
+        incident_id: str,
+        payload: DocumentationReportCreate,
+    ) -> DocumentationReport:
+        await self.get_incident(incident_id)
+        values = _payload_with_extra(payload.model_dump(mode="json"))
+        report = DocumentationReport(incident_id=incident_id, **values)
+        self.session.add(report)
+        await self.session.commit()
+        await self.session.refresh(report)
+        return report
+
+    async def list_documentation_reports(
+        self, incident_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[DocumentationReport]:
+        await self.get_incident(incident_id)
+        stmt = (
+            select(DocumentationReport)
+            .where(DocumentationReport.incident_id == incident_id)
+            .order_by(DocumentationReport.created_at.desc())
             .limit(limit)
             .offset(offset)
         )

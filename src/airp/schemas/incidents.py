@@ -203,6 +203,45 @@ class RemediationPlanRead(TimestampedRead):
     )
 
 
+class DocumentationReportCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=240)
+    status: str = Field(default="draft", min_length=1, max_length=80)
+    executive_summary: str = Field(min_length=1)
+    root_cause_summary: str = Field(min_length=1)
+    impact_summary: str = Field(min_length=1)
+    evidence_summary: str = Field(min_length=1)
+    remediation_summary: str = Field(min_length=1)
+    follow_up_tasks: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    publish_recommended: bool = False
+    publishing_enabled: bool = False
+    published_url: HttpUrl | None = None
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DocumentationReportRead(TimestampedRead):
+    incident_id: str
+    title: str
+    status: str
+    executive_summary: str
+    root_cause_summary: str
+    impact_summary: str
+    evidence_summary: str
+    remediation_summary: str
+    follow_up_tasks: list[str]
+    source_refs: list[str]
+    publish_recommended: bool
+    publishing_enabled: bool
+    published_url: str | None = None
+    confidence: float
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias="extra",
+        serialization_alias="metadata",
+    )
+
+
 class SearchResult(BaseModel):
     incident_id: str
     title: str

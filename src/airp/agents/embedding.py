@@ -57,23 +57,40 @@ class EmbeddingAgent:
 
     def _texts_from_state(self, state: AgentGraphState) -> list[str]:
         texts: list[str] = []
-        if state.get("title"):
-            texts.append(str(state["title"]))
-        if state.get("description"):
-            texts.append(str(state["description"]))
+        self._append_text(texts, state.get("title"))
+        self._append_text(texts, state.get("description"))
         if state.get("monitoring_assessment"):
-            summary = state["monitoring_assessment"].get("summary")
-            if summary:
-                texts.append(str(summary))
+            self._append_text(texts, state["monitoring_assessment"].get("summary"))
         if state.get("correlation_result"):
-            summary = state["correlation_result"].get("context_summary")
-            if summary:
-                texts.append(str(summary))
+            self._append_text(texts, state["correlation_result"].get("context_summary"))
         if state.get("rca_plan"):
-            summary = state["rca_plan"].get("summary")
-            if summary:
-                texts.append(str(summary))
+            self._append_text(texts, state["rca_plan"].get("summary"))
+        if state.get("remediation_result"):
+            remediation = state["remediation_result"]
+            self._append_text(texts, remediation.get("plan_summary"))
+            self._append_text(texts, remediation.get("test_plan"))
+            self._append_text(texts, remediation.get("rollback_plan"))
+            self._append_joined(
+                texts,
+                "Remediation actions",
+                remediation.get("recommended_actions"),
+            )
+        if state.get("documentation_report"):
+            report = state["documentation_report"]
+            self._append_text(texts, report.get("executive_summary"))
+            self._append_text(texts, report.get("root_cause_summary"))
+            self._append_text(texts, report.get("evidence_summary"))
+            self._append_text(texts, report.get("remediation_summary"))
+            self._append_joined(texts, "Documentation follow-ups", report.get("follow_up_tasks"))
         return texts
+
+    def _append_text(self, texts: list[str], value: object) -> None:
+        if value:
+            texts.append(str(value))
+
+    def _append_joined(self, texts: list[str], label: str, value: object) -> None:
+        if isinstance(value, list) and value:
+            texts.append(f"{label}: {', '.join(str(item) for item in value)}")
 
     def _state_update(
         self,

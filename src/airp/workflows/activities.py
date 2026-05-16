@@ -12,6 +12,7 @@ from airp.db.models.catalog import RuntimeWorkload, ServiceCatalog
 from airp.db.session import AsyncSessionLocal
 from airp.domain.enums import IncidentStatus, RiskLevel
 from airp.schemas.incidents import (
+    DocumentationReportCreate,
     EvidenceItemCreate,
     IncidentEventCreate,
     IncidentSignal,
@@ -215,6 +216,7 @@ async def _persist_rca_outputs(
         )
 
     await _persist_remediation_output(service, incident_id, state)
+    await _persist_documentation_output(service, incident_id, state)
 
 
 async def _persist_remediation_output(
@@ -275,6 +277,67 @@ async def _persist_remediation_output(
                 "external_writes_allowed": remediation.get(
                     "external_writes_allowed", False
                 ),
+            },
+        ),
+    )
+
+
+async def _persist_documentation_output(
+    service: IncidentService, incident_id: str, state: dict[str, Any]
+) -> None:
+    report = state.get("documentation_report") or {}
+    if not report:
+        return
+
+    report_hash = _stable_hash(report)
+    existing_reports = await service.list_documentation_reports(incident_id, limit=100)
+    for existing in existing_reports:
+        metadata = existing.extra or {}
+        if (
+            metadata.get("source") == "langgraph.documentation"
+            and metadata.get("state_hash") == report_hash
+        ):
+            return
+
+    stored = await service.create_documentation_report(
+        incident_id,
+        DocumentationReportCreate(
+            title=report.get("title") or f"RCA Draft: {incident_id}",
+            status=report.get("status") or "draft",
+            executive_summary=report.get("executive_summary")
+            or "Documentation draft executive summary is unavailable.",
+            root_cause_summary=report.get("root_cause_summary")
+            or "Root cause summary is unavailable.",
+            impact_summary=report.get("impact_summary")
+            or "Impact summary is unavailable.",
+            evidence_summary=report.get("evidence_summary")
+            or "Evidence summary is unavailable.",
+            remediation_summary=report.get("remediation_summary")
+            or "Remediation summary is unavailable.",
+            follow_up_tasks=list(report.get("follow_up_tasks") or []),
+            source_refs=list(report.get("source_refs") or []),
+            publish_recommended=bool(report.get("publish_recommended", False)),
+            publishing_enabled=bool(report.get("publishing_enabled", False)),
+            published_url=report.get("published_url"),
+            confidence=_confidence(report.get("confidence")),
+            metadata={
+                "source": "langgraph.documentation",
+                "state_hash": report_hash,
+                "publishing_enabled": report.get("publishing_enabled", False),
+                "publish_recommended": report.get("publish_recommended", False),
+            },
+        ),
+    )
+    await service.add_event(
+        incident_id,
+        IncidentEventCreate(
+            event_type="documentation.report.persisted",
+            producer="langgraph.documentation",
+            payload={
+                "documentation_report_id": stored.id,
+                "status": stored.status,
+                "publish_recommended": stored.publish_recommended,
+                "publishing_enabled": stored.publishing_enabled,
             },
         ),
     )
@@ -442,6 +505,14 @@ def _risk_level(value: Any) -> RiskLevel:
         return RiskLevel(str(value))
     except ValueError:
         return RiskLevel.MEDIUM
+
+
+def _confidence(value: Any) -> float:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return min(max(confidence, 0.0), 1.0)
 
 
 def _stable_hash(value: Any) -> str:
