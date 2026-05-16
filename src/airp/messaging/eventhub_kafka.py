@@ -1,4 +1,8 @@
+import json
+from typing import Any
+
 from confluent_kafka import Consumer, Producer
+from pydantic import BaseModel
 
 from airp.core.config import Settings, get_settings
 from airp.core.errors import AppError
@@ -33,3 +37,19 @@ def build_consumer(group_id: str, topics: list[str], settings: Settings | None =
     consumer = Consumer(config)
     consumer.subscribe(topics)
     return consumer
+
+
+def publish_json(
+    producer: Producer,
+    *,
+    topic: str,
+    value: BaseModel | dict[str, Any],
+    key: str | None = None,
+) -> None:
+    payload = value.model_dump(mode="json") if isinstance(value, BaseModel) else value
+    producer.produce(
+        topic,
+        key=key,
+        value=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+    )
+    producer.poll(0)

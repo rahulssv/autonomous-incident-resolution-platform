@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from airp.core.errors import NotFoundError
@@ -27,22 +28,45 @@ class IncidentService:
         self.session = session
 
     async def create_incident(self, payload: IncidentCreate, *, actor: str) -> Incident:
+        incident, _ = await self.create_incident_once(payload, actor=actor)
+        return incident
+
+    async def create_incident_once(
+        self, payload: IncidentCreate, *, actor: str
+    ) -> tuple[Incident, bool]:
+        if payload.idempotency_key:
+            existing = await self.get_incident_by_idempotency_key(payload.idempotency_key)
+            if existing is not None:
+                return existing, False
+
         values = _payload_with_extra(payload.model_dump(mode="json"))
         values["severity"] = payload.severity.value
         incident = Incident(**values)
         self.session.add(incident)
-        await self.session.flush()
-        self.session.add(
-            IncidentEvent(
-                incident_id=incident.id,
-                event_type="incident.created",
-                producer="api",
-                payload={"actor": actor, "title": incident.title},
+        try:
+            await self.session.flush()
+            self.session.add(
+                IncidentEvent(
+                    incident_id=incident.id,
+                    event_type="incident.created",
+                    producer="api",
+                    payload={"actor": actor, "title": incident.title},
+                )
             )
-        )
-        await self.session.commit()
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            if payload.idempotency_key:
+                existing = await self.get_incident_by_idempotency_key(payload.idempotency_key)
+                if existing is not None:
+                    return existing, False
+            raise
         await self.session.refresh(incident)
-        return incident
+        return incident, True
+
+    async def get_incident_by_idempotency_key(self, idempotency_key: str) -> Incident | None:
+        stmt = select(Incident).where(Incident.idempotency_key == idempotency_key)
+        return await self.session.scalar(stmt)
 
     async def list_incidents(
         self,

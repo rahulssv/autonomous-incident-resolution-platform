@@ -10,6 +10,7 @@ from airp.schemas.common import TimestampedRead
 class IncidentCreate(BaseModel):
     title: str = Field(min_length=1, max_length=240)
     description: str | None = None
+    idempotency_key: str | None = Field(default=None, max_length=160)
     service_id: str | None = None
     severity: IncidentSeverity = IncidentSeverity.WARNING
     environment: str = Field(default="prod", max_length=80)
@@ -23,6 +24,7 @@ class IncidentCreate(BaseModel):
 
 
 class IncidentRead(TimestampedRead):
+    idempotency_key: str | None = None
     service_id: str | None = None
     title: str
     description: str | None = None

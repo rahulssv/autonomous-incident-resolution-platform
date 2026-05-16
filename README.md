@@ -57,6 +57,8 @@ AIRP_GATEWAY_API_KEY=<secret>
 AIRP_KAFKA_BOOTSTRAP_SERVERS=<event-hubs-namespace>.servicebus.windows.net:9093
 AIRP_KAFKA_USERNAME=$ConnectionString
 AIRP_KAFKA_PASSWORD=<event-hubs-connection-string>
+AIRP_KAFKA_ALERTS_RAW_TOPIC=airp.alerts.raw
+AIRP_KAFKA_DEADLETTER_TOPIC=airp.deadletter
 ```
 
 ## API Surface
@@ -86,7 +88,24 @@ AIRP_KAFKA_PASSWORD=<event-hubs-connection-string>
 ./scripts/verify.sh
 ```
 
+## Alert Consumer
+
+Run the Event Hubs Kafka-compatible alert consumer:
+
+```bash
+./scripts/run-alert-consumer.sh
+```
+
+The consumer accepts either a raw Alertmanager webhook payload or an AIRP event envelope whose `payload` field contains the Alertmanager webhook body. It validates and deduplicates alerts before creating incidents.
+
+Publish a sample alert into the configured Event Hubs topic:
+
+```bash
+./scripts/publish-sample-alert.py
+```
+
+The sample alert uses a stable fingerprint and incident idempotency key, so repeated publishes should map to one incident row while replay attempts are tracked as duplicates.
+
 ## Deployment
 
 See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
-

@@ -56,6 +56,9 @@ AIRP_KAFKA_SECURITY_PROTOCOL=SASL_SSL
 AIRP_KAFKA_SASL_MECHANISM=PLAIN
 AIRP_KAFKA_USERNAME=$ConnectionString
 AIRP_KAFKA_PASSWORD=<event-hubs-connection-string>
+AIRP_KAFKA_ALERTS_RAW_TOPIC=airp.alerts.raw
+AIRP_KAFKA_DEADLETTER_TOPIC=airp.deadletter
+AIRP_KAFKA_ALERT_CONSUMER_GROUP=airp-alert-consumer
 ```
 
 Store `AIRP_KAFKA_PASSWORD` in Kubernetes Secret only.
@@ -121,6 +124,30 @@ kubectl -n airp port-forward svc/airp-airp 8080:80
 curl http://localhost:8080/api/health
 ```
 
+Run the alert consumer in the same environment:
+
+```bash
+./scripts/run-alert-consumer.sh
+```
+
+Publish a sample Alertmanager-shaped event into the raw alert topic:
+
+```bash
+./scripts/publish-sample-alert.py
+```
+
+Expected demo flow:
+
+```text
+sample Alertmanager payload -> Event Hubs Kafka topic -> alert consumer -> incidents row -> incident.created and alert.validated events
+```
+
+In production this should be packaged as a separate worker Deployment that uses the same image with command:
+
+```bash
+python -m airp.workers.alert_consumer
+```
+
 ## 8. Security Checklist
 
 - Keep Microsoft Entra ID auth enabled.
@@ -129,4 +156,3 @@ curl http://localhost:8080/api/health
 - Use read-only Kubernetes MCP permissions for MVP.
 - Use least-privilege GitHub MCP permissions scoped to AIRP-client repositories.
 - Require human approval before repository write actions.
-

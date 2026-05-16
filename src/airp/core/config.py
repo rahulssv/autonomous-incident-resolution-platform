@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     kafka_sasl_mechanism: str = "PLAIN"
     kafka_username: str = "$ConnectionString"
     kafka_password: str | None = None
+    kafka_alerts_raw_topic: str = "airp.alerts.raw"
+    kafka_incidents_validated_topic: str = "airp.incidents.validated"
+    kafka_deadletter_topic: str = "airp.deadletter"
+    kafka_alert_consumer_group: str = "airp-alert-consumer"
+    alert_dedupe_ttl_seconds: int = 3600
 
     @field_validator("api_prefix")
     @classmethod

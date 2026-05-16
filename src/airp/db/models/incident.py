@@ -1,6 +1,16 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from airp.db.models.base import Base, IdMixin, TimestampMixin, utc_now
@@ -9,7 +19,9 @@ from airp.domain.enums import IncidentSeverity, IncidentStatus, RemediationStatu
 
 class Incident(IdMixin, TimestampMixin, Base):
     __tablename__ = "incidents"
+    __table_args__ = (UniqueConstraint("idempotency_key", name="uq_incidents_idempotency_key"),)
 
+    idempotency_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
     service_id: Mapped[str | None] = mapped_column(
         ForeignKey("services.id"), nullable=True, index=True
     )
