@@ -373,6 +373,23 @@ Publish a sample alert after the consumer is running:
 ./scripts/publish-sample-alert.py
 ```
 
+To run the live Docker Compose E2E path with a unique Kafka/Event Hubs alert,
+database migrations, temporary Temporal and alert-consumer workers, active
+dependency reachability checks, workflow polling, and cleanup:
+
+```bash
+./scripts/run-e2e-kafka.sh
+```
+
+Useful options:
+
+```bash
+AIRP_E2E_TIMEOUT_SECONDS=900 ./scripts/run-e2e-kafka.sh
+AIRP_E2E_REQUIRE_EVIDENCE=true ./scripts/run-e2e-kafka.sh
+AIRP_E2E_MIGRATE=0 AIRP_E2E_BUILD=0 ./scripts/run-e2e-kafka.sh
+AIRP_E2E_BUILD=0 ./scripts/run-e2e-kafka.sh --leave-workflow-open
+```
+
 ## Troubleshooting
 
 - `401 Missing bearer token`: send `Authorization: Bearer <token>`.
