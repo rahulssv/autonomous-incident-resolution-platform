@@ -1,0 +1,60 @@
+replicaCount: 2
+
+image:
+  repository: docker.io/your-org/airp-backend
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+env:
+  AIRP_ENVIRONMENT: production
+  AIRP_LOG_LEVEL: INFO
+  AIRP_AUTH_ENABLED: "true"
+  AIRP_DATABASE_URL: ""
+  AIRP_REDIS_URL: ""
+  AIRP_ENTRA_TENANT_ID: ""
+  AIRP_ENTRA_CLIENT_ID: ""
+  AIRP_GATEWAY_BASE_URL: "https://hub-proxy-service.thankfulfield-16b4d5d6.eastus.azurecontainerapps.io"
+  AIRP_KAFKA_BOOTSTRAP_SERVERS: ""
+  AIRP_KAFKA_SECURITY_PROTOCOL: SASL_SSL
+  AIRP_KAFKA_SASL_MECHANISM: PLAIN
+  AIRP_KAFKA_USERNAME: "$ConnectionString"
+
+secretEnv:
+  AIRP_GATEWAY_API_KEY: ""
+  AIRP_KAFKA_PASSWORD: ""
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+ingress:
+  enabled: false
+  className: nginx
+  hosts:
+    - host: airp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+

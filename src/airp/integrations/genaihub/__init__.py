@@ -1,0 +1,1 @@
+"""GenAI Hub gateway adapter."""

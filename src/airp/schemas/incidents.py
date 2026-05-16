@@ -1,0 +1,152 @@
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field, HttpUrl
+
+from airp.domain.enums import ApprovalDecision, IncidentSeverity, IncidentStatus, RiskLevel
+from airp.schemas.common import TimestampedRead
+
+
+class IncidentCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=240)
+    description: str | None = None
+    service_id: str | None = None
+    severity: IncidentSeverity = IncidentSeverity.WARNING
+    environment: str = Field(default="prod", max_length=80)
+    owner: str | None = None
+    correlation_id: str | None = None
+    namespace: str | None = None
+    pod_name: str | None = None
+    image_tag: str | None = None
+    image_digest: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class IncidentRead(TimestampedRead):
+    service_id: str | None = None
+    title: str
+    description: str | None = None
+    severity: str
+    status: str
+    environment: str
+    owner: str | None = None
+    correlation_id: str | None = None
+    namespace: str | None = None
+    pod_name: str | None = None
+    image_tag: str | None = None
+    image_digest: str | None = None
+    github_issue_url: str | None = None
+    slack_thread_url: str | None = None
+    started_at: datetime
+    closed_at: datetime | None = None
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias="extra",
+        serialization_alias="metadata",
+    )
+
+
+class IncidentEventCreate(BaseModel):
+    event_type: str = Field(min_length=1, max_length=120)
+    producer: str = Field(default="api", max_length=160)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class IncidentEventRead(TimestampedRead):
+    incident_id: str
+    event_type: str
+    producer: str
+    payload: dict[str, Any]
+
+
+class IncidentSignal(BaseModel):
+    status: IncidentStatus
+    reason: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class IncidentTimeline(BaseModel):
+    incident: IncidentRead
+    events: list[IncidentEventRead]
+
+
+class ApprovalCreate(BaseModel):
+    requested_action: str = Field(min_length=1)
+    requested_by: str = Field(min_length=1, max_length=240)
+    payload_hash: str = Field(min_length=12, max_length=128)
+    expires_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApprovalDecisionCreate(BaseModel):
+    decision: ApprovalDecision
+    approver: str = Field(min_length=1, max_length=240)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApprovalRead(TimestampedRead):
+    incident_id: str
+    requested_action: str
+    requested_by: str
+    approver: str | None = None
+    decision: str | None = None
+    payload_hash: str
+    expires_at: datetime | None = None
+    decided_at: datetime | None = None
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias="extra",
+        serialization_alias="metadata",
+    )
+
+
+class EvidenceItemCreate(BaseModel):
+    evidence_type: str = Field(min_length=1, max_length=120)
+    source: str = Field(min_length=1, max_length=160)
+    summary: str = Field(min_length=1)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvidenceItemRead(TimestampedRead):
+    incident_id: str
+    evidence_type: str
+    source: str
+    summary: str
+    data: dict[str, Any]
+
+
+class RemediationPlanCreate(BaseModel):
+    plan_summary: str = Field(min_length=1)
+    risk_level: RiskLevel = RiskLevel.MEDIUM
+    github_issue_url: HttpUrl | None = None
+    github_pr_url: HttpUrl | None = None
+    test_plan: str | None = None
+    rollback_plan: str | None = None
+    approval_required: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RemediationPlanRead(TimestampedRead):
+    incident_id: str
+    plan_summary: str
+    risk_level: str
+    status: str
+    github_issue_url: str | None = None
+    github_pr_url: str | None = None
+    test_plan: str | None = None
+    rollback_plan: str | None = None
+    approval_required: bool
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias="extra",
+        serialization_alias="metadata",
+    )
+
+
+class SearchResult(BaseModel):
+    incident_id: str
+    title: str
+    severity: str
+    status: str
+    score: float | None = None
+    summary: str | None = None

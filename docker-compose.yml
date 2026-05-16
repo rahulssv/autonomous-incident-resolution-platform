@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: airp
+      POSTGRES_PASSWORD: airp
+      POSTGRES_DB: airp
+    ports:
+      - "5432:5432"
+    volumes:
+      - airp-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airp -d airp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  temporal:
+    image: temporalio/auto-setup:1.25
+    environment:
+      DB: postgresql
+      DB_PORT: 5432
+      POSTGRES_USER: airp
+      POSTGRES_PWD: airp
+      POSTGRES_SEEDS: postgres
+    ports:
+      - "7233:7233"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    environment:
+      AIRP_DATABASE_URL: postgresql+asyncpg://airp:airp@postgres:5432/airp
+      AIRP_REDIS_URL: redis://redis:6379/0
+      AIRP_ENVIRONMENT: development
+      AIRP_LOG_LEVEL: INFO
+      AIRP_AUTH_ENABLED: "true"
+      AIRP_ENTRA_TENANT_ID: ${AIRP_ENTRA_TENANT_ID:-}
+      AIRP_ENTRA_CLIENT_ID: ${AIRP_ENTRA_CLIENT_ID:-}
+      AIRP_GATEWAY_BASE_URL: ${AIRP_GATEWAY_BASE_URL:-https://hub-proxy-service.thankfulfield-16b4d5d6.eastus.azurecontainerapps.io}
+      AIRP_GATEWAY_API_KEY: ${AIRP_GATEWAY_API_KEY:-}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  airp-postgres:
+

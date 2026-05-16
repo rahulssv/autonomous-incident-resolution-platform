@@ -1,0 +1,7 @@
+apiVersion: v2
+name: airp
+description: AIRP backend API for autonomous incident resolution
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
