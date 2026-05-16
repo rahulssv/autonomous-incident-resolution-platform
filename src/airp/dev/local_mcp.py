@@ -606,6 +606,21 @@ def _github_fixture_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]
             return {"result": {"prior_issues": issues}}
         case "github.lookup_branches":
             return {"result": {"branches": [{"name": "main", "protected": True}]}}
+        case "github.create_issue":
+            title = str(arguments.get("title") or "AIRP incident")
+            body = str(arguments.get("body") or "")
+            issue = {
+                "number": 9999,
+                "title": title,
+                "body": body,
+                "url": f"{repository_url}/issues/9999",
+                "state": "open",
+                "created_at": "2026-05-16T00:00:00Z",
+                "updated_at": "2026-05-16T00:00:00Z",
+                "labels": list(arguments.get("labels") or []),
+                "raw": {"html_url": f"{repository_url}/issues/9999", "fixture": True},
+            }
+            return {"result": {"issue": issue}}
         case _:
             raise HTTPException(status_code=404, detail=f"Unsupported GitHub MCP tool: {tool}")
 
@@ -695,6 +710,33 @@ async def _github_app_tool(tool: str, arguments: dict[str, Any]) -> dict[str, An
                 "GET", f"/repos/{repo_path}/branches", token, params={"per_page": limit}
             )
             return {"result": {"branches": [_branch_payload(item) for item in data]}}
+        case "github.create_issue":
+            title = str(arguments.get("title") or "").strip()
+            body = str(arguments.get("body") or "").strip()
+            labels = [str(label) for label in arguments.get("labels") or [] if label]
+            if not title or not body:
+                raise HTTPException(
+                    status_code=400,
+                    detail="github.create_issue requires title and body",
+                )
+            issue_payload = {"title": title, "body": body, "labels": labels}
+            try:
+                data = await _github_installation_request(
+                    "POST",
+                    f"/repos/{repo_path}/issues",
+                    token,
+                    json_body=issue_payload,
+                )
+            except HTTPException as exc:
+                if exc.status_code != 422 or not labels:
+                    raise
+                data = await _github_installation_request(
+                    "POST",
+                    f"/repos/{repo_path}/issues",
+                    token,
+                    json_body={"title": title, "body": body},
+                )
+            return {"result": {"issue": _issue_payload(data)}}
         case _:
             raise HTTPException(status_code=404, detail=f"Unsupported GitHub MCP tool: {tool}")
 
@@ -775,8 +817,9 @@ async def _github_installation_request(
     token: str,
     *,
     params: dict[str, Any] | None = None,
+    json_body: dict[str, Any] | None = None,
 ) -> Any:
-    return await _github_request(method, path, token=token, params=params)
+    return await _github_request(method, path, token=token, params=params, json_body=json_body)
 
 
 async def _github_request(
@@ -785,6 +828,7 @@ async def _github_request(
     *,
     token: str,
     params: dict[str, Any] | None = None,
+    json_body: dict[str, Any] | None = None,
 ) -> Any:
     url = f"{os.getenv('AIRP_GITHUB_API_BASE_URL', 'https://api.github.com').rstrip('/')}{path}"
     headers = {
@@ -794,7 +838,7 @@ async def _github_request(
     }
     timeout = float(os.getenv("AIRP_GITHUB_APP_API_TIMEOUT_SECONDS", "20"))
     async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.request(method, url, headers=headers, params=params)
+        response = await client.request(method, url, headers=headers, params=params, json=json_body)
     if response.status_code >= 400:
         raise HTTPException(status_code=response.status_code, detail=_github_error(response))
     if not response.content:
@@ -904,6 +948,7 @@ def _issue_payload(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "number": item.get("number"),
         "title": item.get("title"),
+        "body": item.get("body"),
         "url": item.get("html_url"),
         "state": item.get("state"),
         "created_at": item.get("created_at"),

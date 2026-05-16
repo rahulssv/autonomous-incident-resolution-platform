@@ -398,6 +398,83 @@ async def test_github_mcp_http_transport_collects_live_repository_evidence() -> 
 
 
 @pytest.mark.asyncio
+async def test_github_mcp_creates_issue_through_mcp_tool() -> None:
+    seen_arguments: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body["tool"] == "github.create_issue"
+        seen_arguments.update(body["arguments"])
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "issue": {
+                        "number": 123,
+                        "title": body["arguments"]["title"],
+                        "url": "https://github.com/AIRP-client/checkout-api/issues/123",
+                        "labels": body["arguments"]["labels"],
+                    }
+                }
+            },
+        )
+
+    client = GitHubMCPClient(
+        transport="mcp",
+        endpoint_url="https://github-mcp.example",
+        http_transport=httpx.MockTransport(handler),
+    )
+
+    issue = await client.create_issue(
+        "https://github.com/AIRP-client/checkout-api",
+        "AIRP incident",
+        "RCA body",
+        labels=["airp", "incident"],
+    )
+
+    assert issue["number"] == 123
+    assert issue["url"].endswith("/issues/123")
+    assert seen_arguments["repository_url"] == "https://github.com/AIRP-client/checkout-api"
+    assert seen_arguments["labels"] == ["airp", "incident"]
+
+
+@pytest.mark.asyncio
+async def test_github_mcp_finds_issue_by_idempotency_marker_in_body() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        assert body["tool"] == "github.lookup_prior_issues"
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "issues": [
+                        {
+                            "number": 99,
+                            "title": "AIRP incident",
+                            "body": "created by AIRP-INCIDENT-ID-inc-123",
+                            "url": "https://github.com/AIRP-client/checkout-api/issues/99",
+                        }
+                    ]
+                }
+            },
+        )
+
+    client = GitHubMCPClient(
+        transport="mcp",
+        endpoint_url="https://github-mcp.example",
+        http_transport=httpx.MockTransport(handler),
+    )
+
+    issue = await client.lookup_issue_by_idempotency_marker(
+        "https://github.com/AIRP-client/checkout-api",
+        "AIRP-INCIDENT-ID-inc-123",
+    )
+
+    assert issue is not None
+    assert issue["number"] == 99
+
+
+@pytest.mark.asyncio
 async def test_github_mcp_collects_partial_evidence_when_one_tool_fails() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode())

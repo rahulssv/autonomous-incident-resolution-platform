@@ -18,12 +18,14 @@ from airp.core.config import Settings, get_settings
 from airp.db.models.incident import (
     DocumentationReport,
     EvidenceItem,
+    GitHubArtifact,
     Incident,
     IncidentEmbedding,
     IncidentEvent,
     ModelCall,
     RCAHypothesis,
     RemediationPlan,
+    SlackMessage,
     ToolCall,
 )
 from airp.db.session import AsyncSessionLocal
@@ -47,10 +49,16 @@ DEFAULT_REQUIRED_EVENTS = (
     "remediation.planned",
     "documentation.drafted",
     "workflow.step.completed",
-    "github.issue.skipped",
-    "slack.notification.skipped",
+    "github.issue.created",
+    "slack.notification.sent",
 )
 EMBEDDING_STEP_EVENTS = {"embedding.generated", "embedding.skipped"}
+EXTERNAL_ACTION_TERMINAL_FAILURES = {
+    "github.issue.failed",
+    "github.issue.skipped",
+    "slack.notification.failed",
+    "slack.notification.skipped",
+}
 
 
 @dataclass
@@ -367,6 +375,8 @@ async def _wait_for_e2e_result(
                 snapshot.counts["hypotheses"] >= 1
                 and snapshot.counts["remediation_plans"] >= 1
                 and snapshot.counts["documentation_reports"] >= 1
+                and snapshot.counts["github_artifacts"] >= 1
+                and snapshot.counts["slack_messages"] >= 1
                 and (snapshot.counts["evidence"] >= 1 or not require_evidence)
             )
             if not missing_events and embedding_step_ready and required_artifacts_ready:
@@ -453,6 +463,8 @@ async def _snapshot(session, incident: Incident | None) -> E2ESnapshot:
         "model_calls": await _count(session, ModelCall, incident.id),
         "remediation_plans": await _count(session, RemediationPlan, incident.id),
         "documentation_reports": await _count(session, DocumentationReport, incident.id),
+        "github_artifacts": await _count(session, GitHubArtifact, incident.id),
+        "slack_messages": await _count(session, SlackMessage, incident.id),
         "embeddings": await _count(session, IncidentEmbedding, incident.id),
     }
     return E2ESnapshot(
@@ -485,6 +497,8 @@ def _empty_counts() -> dict[str, int]:
         "model_calls": 0,
         "remediation_plans": 0,
         "documentation_reports": 0,
+        "github_artifacts": 0,
+        "slack_messages": 0,
         "embeddings": 0,
     }
 
@@ -492,6 +506,12 @@ def _empty_counts() -> dict[str, int]:
 def _raise_for_failed_workflow(snapshot: E2ESnapshot) -> None:
     if "workflow.start_failed" in snapshot.event_type_set:
         raise SystemExit(f"Workflow failed to start for incident {snapshot.incident_id}")
+    failed_external_events = sorted(snapshot.event_type_set & EXTERNAL_ACTION_TERMINAL_FAILURES)
+    if failed_external_events:
+        raise SystemExit(
+            f"External action did not complete for incident {snapshot.incident_id}: "
+            f"{failed_external_events}"
+        )
 
 
 def _print_progress(
@@ -510,6 +530,10 @@ def _print_progress(
         artifact_gaps.append("remediation_plans")
     if snapshot.counts["documentation_reports"] < 1:
         artifact_gaps.append("documentation_reports")
+    if snapshot.counts["github_artifacts"] < 1:
+        artifact_gaps.append("github_artifacts")
+    if snapshot.counts["slack_messages"] < 1:
+        artifact_gaps.append("slack_messages")
     if require_evidence and snapshot.counts["evidence"] < 1:
         artifact_gaps.append("evidence")
     _print_step(

@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     readiness_probe_timeout_seconds: float = Field(default=2.0, gt=0.0)
     github_issue_creation_enabled: bool = False
     slack_notifications_enabled: bool = False
+    slack_webhook_url: AnyHttpUrl | None = None
+    slack_default_channel: str = "#airp-alerts"
+    slack_signing_secret: str | None = None
     remediation_pr_creation_enabled: bool = False
     documentation_publishing_enabled: bool = False
 
@@ -86,6 +89,7 @@ class Settings(BaseSettings):
     kafka_incidents_validated_topic: str = "airp.incidents.validated"
     kafka_deadletter_topic: str = "airp.deadletter"
     kafka_alert_consumer_group: str = "airp-alert-consumer"
+    kafka_auto_offset_reset: Literal["earliest", "latest"] = "earliest"
     alert_dedupe_ttl_seconds: int = 3600
 
     temporal_address: str = "localhost:7233"
@@ -123,7 +127,13 @@ class Settings(BaseSettings):
             return f"/{value}"
         return value.rstrip("/") or "/api"
 
-    @field_validator("gateway_base_url", "kubernetes_mcp_url", "github_mcp_url", mode="before")
+    @field_validator(
+        "gateway_base_url",
+        "kubernetes_mcp_url",
+        "github_mcp_url",
+        "slack_webhook_url",
+        mode="before",
+    )
     @classmethod
     def empty_url_to_none(cls, value: object) -> object:
         if value == "":

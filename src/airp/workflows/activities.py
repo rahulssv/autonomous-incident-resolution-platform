@@ -2,15 +2,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from sqlalchemy import select
 from temporalio import activity
 
 from airp.agents.factory import build_default_agent_supervisor
+from airp.core.allowlists import is_github_repository_allowed
+from airp.core.config import Settings, get_settings
+from airp.core.policy import ExternalActionPolicy
 from airp.db.models.catalog import RuntimeWorkload, ServiceCatalog
+from airp.db.models.incident import EvidenceItem, Incident
 from airp.db.session import AsyncSessionLocal
 from airp.domain.enums import IncidentStatus, RiskLevel
+from airp.integrations.github_mcp.client import GitHubMCPClient
+from airp.integrations.slack.client import SlackClient
 from airp.schemas.incidents import (
     DocumentationReportCreate,
     EvidenceItemCreate,
@@ -96,6 +103,515 @@ async def agent_graph_run(incident_id: str, workflow_id: str | None = None) -> N
                 ),
             )
         await _persist_rca_outputs(service, incident_id, state)
+
+
+@activity.defn(name="incident_create_github_issue")
+async def incident_create_github_issue(incident_id: str) -> dict[str, Any]:
+    settings = get_settings()
+    policy = ExternalActionPolicy(settings).github_issue_creation()
+    async with AsyncSessionLocal() as session:
+        service = IncidentService(session)
+        incident = await service.get_incident(incident_id)
+
+        if not policy.allowed:
+            await _record_external_action_skipped(
+                service,
+                incident_id,
+                "github.issue.skipped",
+                policy.reason,
+            )
+            return {"status": "skipped", "reason": policy.reason}
+
+        repository_url = await _github_repository_for_incident(session, incident, settings)
+        if not repository_url:
+            reason = "No GitHub repository could be resolved for this incident"
+            await _record_external_action_failed(
+                service,
+                incident_id,
+                "github.issue.failed",
+                reason,
+            )
+            return {"status": "failed", "reason": reason}
+
+        if not is_github_repository_allowed(
+            repository_url,
+            settings.github_mcp_repository_allowlist,
+        ):
+            reason = "Resolved GitHub repository is outside the configured allowlist"
+            await _record_external_action_failed(
+                service,
+                incident_id,
+                "github.issue.failed",
+                reason,
+                {"repository_url": repository_url},
+            )
+            return {"status": "failed", "reason": reason, "repository_url": repository_url}
+
+        client = GitHubMCPClient(
+            transport=settings.github_mcp_transport,
+            endpoint_url=str(settings.github_mcp_url) if settings.github_mcp_url else None,
+            timeout_seconds=settings.github_mcp_read_timeout_seconds,
+        )
+        marker = f"AIRP-INCIDENT-ID-{incident_id}"
+        labels = ["airp", "incident", f"severity:{incident.severity}"]
+        title = _github_issue_title(incident, marker)
+        body = await _github_issue_body(service, incident, marker)
+
+        try:
+            existing = await client.lookup_issue_by_idempotency_marker(repository_url, marker)
+            issue = existing or await client.create_issue(
+                repository_url,
+                title,
+                body,
+                labels=labels,
+            )
+            issue_url = _github_issue_url(issue)
+            if not issue_url:
+                raise ValueError("GitHub MCP issue response did not include an issue URL")
+
+            external_id = _github_issue_number(issue)
+            await service.add_tool_call(
+                incident_id,
+                tool_server="github_mcp",
+                tool_name="github.create_issue",
+                parameters={
+                    "repository_url": repository_url,
+                    "title": title,
+                    "labels": labels,
+                    "idempotency_marker": marker,
+                },
+                result={
+                    "status": "existing" if existing else "created",
+                    "issue_url": issue_url,
+                    "external_id": external_id,
+                },
+            )
+            await service.record_github_issue(
+                incident_id,
+                repository_url=repository_url,
+                artifact_url=issue_url,
+                external_id=external_id,
+                metadata={
+                    "title": title,
+                    "labels": labels,
+                    "idempotency_marker": marker,
+                    "existing": bool(existing),
+                },
+            )
+            return {
+                "status": "created",
+                "repository_url": repository_url,
+                "issue_url": issue_url,
+                "external_id": external_id,
+                "existing": bool(existing),
+            }
+        except Exception as exc:  # noqa: BLE001 - external action failure is recorded
+            error = _safe_error(exc)
+            await service.add_tool_call(
+                incident_id,
+                tool_server="github_mcp",
+                tool_name="github.create_issue",
+                parameters={
+                    "repository_url": repository_url,
+                    "title": title,
+                    "labels": labels,
+                    "idempotency_marker": marker,
+                },
+                result={"status": "failed"},
+                error=error,
+            )
+            await _record_external_action_failed(
+                service,
+                incident_id,
+                "github.issue.failed",
+                error,
+                {"repository_url": repository_url},
+            )
+            return {"status": "failed", "reason": error, "repository_url": repository_url}
+
+
+@activity.defn(name="incident_send_slack_notification")
+async def incident_send_slack_notification(incident_id: str) -> dict[str, Any]:
+    settings = get_settings()
+    policy = ExternalActionPolicy(settings).slack_notification()
+    async with AsyncSessionLocal() as session:
+        service = IncidentService(session)
+        incident = await service.get_incident(incident_id)
+
+        if not policy.allowed:
+            await _record_external_action_skipped(
+                service,
+                incident_id,
+                "slack.notification.skipped",
+                policy.reason,
+            )
+            return {"status": "skipped", "reason": policy.reason}
+
+        channel = await _slack_channel_for_incident(session, incident, settings)
+        payload = await _slack_notification_payload(service, incident, channel)
+        client = SlackClient(settings)
+
+        try:
+            result = await client.send_incident_notification(channel, payload)
+            persisted_payload = {
+                "text": payload.get("text"),
+                "blocks": payload.get("blocks"),
+                "github_issue_url": incident.github_issue_url,
+            }
+            message = await service.record_slack_message(
+                incident_id,
+                channel=channel,
+                message_ts=_string_or_none(result.get("message_ts")),
+                thread_ts=_string_or_none(result.get("thread_ts")),
+                message_url=_string_or_none(result.get("message_url")),
+                payload=persisted_payload,
+            )
+            return {
+                "status": "sent",
+                "channel": channel,
+                "slack_message_id": message.id,
+                "status_code": result.get("status_code"),
+            }
+        except Exception as exc:  # noqa: BLE001 - external action failure is recorded
+            error = _safe_error(exc)
+            await _record_external_action_failed(
+                service,
+                incident_id,
+                "slack.notification.failed",
+                error,
+                {"channel": channel},
+            )
+            return {"status": "failed", "reason": error, "channel": channel}
+
+
+async def _github_repository_for_incident(
+    session,
+    incident: Incident,
+    settings: Settings,
+) -> str | None:
+    if incident.service_id:
+        service = await session.get(ServiceCatalog, incident.service_id)
+        if service and service.repository_url:
+            return service.repository_url
+
+    stmt = (
+        select(EvidenceItem)
+        .where(EvidenceItem.incident_id == incident.id, EvidenceItem.evidence_type == "github")
+        .order_by(EvidenceItem.created_at.desc())
+        .limit(1)
+    )
+    github_evidence = await session.scalar(stmt)
+    evidence_data = github_evidence.data if github_evidence else {}
+    repository_url = _repository_from_payload(evidence_data)
+    if repository_url:
+        return repository_url
+
+    metadata = incident.extra or {}
+    repository_url = _repository_from_payload(metadata)
+    if repository_url:
+        return repository_url
+
+    labels = metadata.get("labels") if isinstance(metadata.get("labels"), dict) else {}
+    service_name = _first_string(
+        metadata.get("service"),
+        labels.get("service"),
+        labels.get("app"),
+        labels.get("deployment"),
+    )
+    if service_name:
+        return f"https://github.com/{settings.client_github_org}/{service_name}"
+    return None
+
+
+async def _slack_channel_for_incident(
+    session,
+    incident: Incident,
+    settings: Settings,
+) -> str:
+    if incident.service_id:
+        service = await session.get(ServiceCatalog, incident.service_id)
+        if service and service.slack_channel:
+            return service.slack_channel
+    return settings.slack_default_channel
+
+
+async def _github_issue_body(
+    service: IncidentService,
+    incident: Incident,
+    marker: str,
+) -> str:
+    hypotheses = await service.list_rca_hypotheses(incident.id, limit=3)
+    remediation_plans = await service.list_remediation_plans(incident.id, limit=2)
+    reports = await service.list_documentation_reports(incident.id, limit=1)
+    evidence_items = await service.list_evidence(incident.id, limit=5)
+    events = await service.get_events(incident.id, limit=12)
+
+    lines = [
+        f"<!-- {marker} -->",
+        "# AIRP Incident RCA",
+        "",
+        "## Incident",
+        f"- Incident ID: `{incident.id}`",
+        f"- Severity: `{incident.severity}`",
+        f"- Environment: `{incident.environment}`",
+        f"- Namespace: `{incident.namespace or 'unknown'}`",
+        f"- Pod: `{incident.pod_name or 'unknown'}`",
+        f"- Correlation ID: `{incident.correlation_id or 'unknown'}`",
+        f"- Title: {_truncate(incident.title, 220)}",
+    ]
+    if incident.description:
+        lines.extend(["", "## Description", _truncate(incident.description, 2000)])
+
+    lines.extend(["", "## Root Cause Hypotheses"])
+    if hypotheses:
+        for hypothesis in hypotheses:
+            lines.append(
+                "- "
+                f"Rank {hypothesis.rank}, confidence {hypothesis.confidence:.2f}: "
+                f"{_truncate(hypothesis.hypothesis, 800)}"
+            )
+    else:
+        lines.append("- No persisted hypothesis was available.")
+
+    lines.extend(["", "## Evidence"])
+    if evidence_items:
+        for evidence in evidence_items:
+            lines.append(
+                "- "
+                f"{evidence.evidence_type} from {evidence.source}: "
+                f"{_truncate(evidence.summary, 500)}"
+            )
+    else:
+        lines.append("- No persisted evidence was available.")
+
+    lines.extend(["", "## Remediation"])
+    if remediation_plans:
+        for plan in remediation_plans:
+            lines.append(
+                "- "
+                f"Risk {plan.risk_level}, approval_required={plan.approval_required}: "
+                f"{_truncate(plan.plan_summary, 800)}"
+            )
+            if plan.test_plan:
+                lines.append(f"  - Test plan: {_truncate(plan.test_plan, 500)}")
+            if plan.rollback_plan:
+                lines.append(f"  - Rollback plan: {_truncate(plan.rollback_plan, 500)}")
+    else:
+        lines.append("- No remediation plan was available.")
+
+    if reports:
+        report = reports[0]
+        lines.extend(
+            [
+                "",
+                "## Post-Mortem Draft",
+                f"- Title: {_truncate(report.title, 220)}",
+                f"- Summary: {_truncate(report.executive_summary, 800)}",
+                f"- Root cause: {_truncate(report.root_cause_summary, 800)}",
+            ]
+        )
+
+    lines.extend(["", "## Timeline"])
+    for event in events:
+        lines.append(f"- `{event.created_at.isoformat()}` `{event.event_type}`")
+
+    lines.extend(
+        [
+            "",
+            "## Automation",
+            (
+                "Created automatically by AIRP after Kafka ingestion, MCP evidence "
+                "collection, RCA synthesis, remediation planning, and documentation draft."
+            ),
+        ]
+    )
+    return "\n".join(lines)
+
+
+async def _slack_notification_payload(
+    service: IncidentService,
+    incident: Incident,
+    channel: str,
+) -> dict[str, Any]:
+    hypotheses = await service.list_rca_hypotheses(incident.id, limit=1)
+    remediation_plans = await service.list_remediation_plans(incident.id, limit=1)
+    evidence_items = await service.list_evidence(incident.id, limit=3)
+
+    hypothesis = hypotheses[0].hypothesis if hypotheses else "No RCA hypothesis persisted."
+    remediation = (
+        remediation_plans[0].plan_summary
+        if remediation_plans
+        else "No remediation plan persisted."
+    )
+    issue_link = (
+        f"<{incident.github_issue_url}|GitHub issue>"
+        if incident.github_issue_url
+        else "GitHub issue unavailable"
+    )
+    evidence_summary = "; ".join(
+        f"{item.evidence_type}: {_truncate(item.summary, 160)}" for item in evidence_items
+    )
+    if not evidence_summary:
+        evidence_summary = "No evidence summary available."
+
+    text = (
+        f"AIRP incident {incident.id} RCA ready: {incident.title}. "
+        f"Issue: {incident.github_issue_url or 'unavailable'}"
+    )
+    return {
+        "text": _truncate(text, 2000),
+        "blocks": [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": _truncate(f"AIRP {incident.severity.upper()} incident", 140),
+                },
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Incident*\n`{incident.id}`"},
+                    {"type": "mrkdwn", "text": f"*Channel*\n`{channel}`"},
+                    {"type": "mrkdwn", "text": f"*Service*\n`{_incident_service_name(incident)}`"},
+                    {"type": "mrkdwn", "text": f"*Issue*\n{issue_link}"},
+                ],
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*RCA*\n{_truncate(hypothesis, 2800)}",
+                },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Remediation*\n{_truncate(remediation, 1800)}",
+                },
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Evidence:* {_truncate(evidence_summary, 1800)}",
+                    }
+                ],
+            },
+        ],
+    }
+
+
+async def _record_external_action_skipped(
+    service: IncidentService,
+    incident_id: str,
+    event_type: str,
+    reason: str,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    await service.add_event(
+        incident_id,
+        IncidentEventCreate(
+            event_type=event_type,
+            producer="temporal-workflow",
+            payload={"reason": reason, **(payload or {})},
+        ),
+    )
+
+
+async def _record_external_action_failed(
+    service: IncidentService,
+    incident_id: str,
+    event_type: str,
+    error: str,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    await service.add_event(
+        incident_id,
+        IncidentEventCreate(
+            event_type=event_type,
+            producer="temporal-workflow",
+            payload={"error": _redact_secret_urls(error), **(payload or {})},
+        ),
+    )
+
+
+def _github_issue_title(incident: Incident, marker: str) -> str:
+    service_name = _incident_service_name(incident)
+    suffix = f" [{marker}]"
+    base = f"[AIRP][{incident.severity}] {service_name}: {incident.title}"
+    return f"{_truncate(base, 240 - len(suffix))}{suffix}"
+
+
+def _repository_from_payload(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    return _first_string(
+        payload.get("repository_url"),
+        payload.get("repo_url"),
+        payload.get("repository"),
+        payload.get("repo"),
+    )
+
+
+def _incident_service_name(incident: Incident) -> str:
+    metadata = incident.extra or {}
+    labels = metadata.get("labels") if isinstance(metadata.get("labels"), dict) else {}
+    return (
+        _first_string(
+            metadata.get("service"),
+            labels.get("service"),
+            labels.get("app"),
+            labels.get("deployment"),
+        )
+        or "unknown-service"
+    )
+
+
+def _github_issue_url(issue: dict[str, Any]) -> str | None:
+    raw = issue.get("raw") if isinstance(issue.get("raw"), dict) else {}
+    return _first_string(issue.get("url"), issue.get("html_url"), raw.get("html_url"))
+
+
+def _github_issue_number(issue: dict[str, Any]) -> str | None:
+    value = issue.get("number")
+    return str(value) if value is not None else None
+
+
+def _first_string(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _safe_error(exc: Exception) -> str:
+    message = _redact_secret_urls(str(exc))
+    return _truncate(f"{exc.__class__.__name__}: {message}", 500)
+
+
+def _redact_secret_urls(value: str) -> str:
+    return re.sub(
+        r"https://hooks\.slack\.com/services/[^\s)]+",
+        "https://hooks.slack.com/services/[redacted]",
+        value,
+    )
+
+
+def _truncate(value: Any, max_length: int) -> str:
+    text = str(value)
+    if len(text) <= max_length:
+        return text
+    return f"{text[: max_length - 3]}..."
 
 
 async def _persist_rca_outputs(

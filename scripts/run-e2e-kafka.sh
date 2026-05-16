@@ -4,6 +4,7 @@ set -euo pipefail
 RUN_ID="$(date -u +%Y%m%d%H%M%S)-$$"
 TEMPORAL_CONTAINER="airp-e2e-temporal-worker-${RUN_ID}"
 ALERT_CONTAINER="airp-e2e-alert-consumer-${RUN_ID}"
+E2E_CONSUMER_GROUP="${AIRP_E2E_CONSUMER_GROUP:-airp-e2e-alert-consumer-${RUN_ID}}"
 CORE_SERVICES=(postgres redis temporal kubernetes-mcp github-mcp)
 
 cleanup() {
@@ -73,7 +74,10 @@ docker compose run -d --name "${TEMPORAL_CONTAINER}" --no-deps api \
 wait_container_running "${TEMPORAL_CONTAINER}"
 
 echo "[airp-e2e] Starting temporary Kafka alert consumer: ${ALERT_CONTAINER}"
-docker compose run -d --name "${ALERT_CONTAINER}" --no-deps api \
+docker compose run -d --name "${ALERT_CONTAINER}" --no-deps \
+  -e AIRP_KAFKA_ALERT_CONSUMER_GROUP="${E2E_CONSUMER_GROUP}" \
+  -e AIRP_KAFKA_AUTO_OFFSET_RESET=latest \
+  api \
   python -m airp.workers.alert_consumer >/dev/null
 wait_container_running "${ALERT_CONTAINER}"
 

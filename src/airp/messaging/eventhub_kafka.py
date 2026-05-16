@@ -28,10 +28,11 @@ def build_producer(settings: Settings | None = None) -> Producer:
 
 
 def build_consumer(group_id: str, topics: list[str], settings: Settings | None = None) -> Consumer:
+    settings = settings or get_settings()
     config = {
         **kafka_config(settings),
         "group.id": group_id,
-        "auto.offset.reset": "earliest",
+        "auto.offset.reset": settings.kafka_auto_offset_reset,
         "enable.auto.commit": "false",
     }
     consumer = Consumer(config)

@@ -10,6 +10,7 @@ from temporalio.common import RetryPolicy
 from airp.domain.enums import IncidentStatus
 
 ACTIVITY_TIMEOUT = timedelta(seconds=30)
+EXTERNAL_ACTION_ACTIVITY_TIMEOUT = timedelta(seconds=90)
 ACTIVITY_RETRY_POLICY = RetryPolicy(
     initial_interval=timedelta(seconds=1),
     maximum_interval=timedelta(seconds=10),
@@ -79,22 +80,40 @@ class IncidentWorkflow:
             "workflow.step.completed",
             {"step": "rca_hypotheses_generated"},
         )
-        self.state.current_step = "issue_creation_skipped"
-        await self._record_workflow_event(
-            "github.issue.skipped",
-            {
-                "reason": "GitHub issue creation policy is disabled",
-                "policy_default": "disabled",
-            },
-        )
-        self.state.current_step = "slack_notification_skipped"
-        await self._record_workflow_event(
-            "slack.notification.skipped",
-            {
-                "reason": "Slack notification policy is disabled",
-                "policy_default": "disabled",
-            },
-        )
+        github_result = await self._create_github_issue()
+        self.state.current_step = f"github_issue_{github_result.get('status', 'unknown')}"
+        if github_result.get("status") == "created":
+            self.state.status = IncidentStatus.RCA_ISSUE_CREATED.value
+            await self._update_status(
+                IncidentStatus.RCA_ISSUE_CREATED.value,
+                "GitHub issue was created for the RCA.",
+                {
+                    "issue_url": github_result.get("issue_url"),
+                    "repository_url": github_result.get("repository_url"),
+                    "existing": github_result.get("existing"),
+                },
+            )
+            await self._record_workflow_event(
+                "workflow.step.completed",
+                {"step": "github_issue_created"},
+            )
+
+        slack_result = await self._send_slack_notification()
+        self.state.current_step = f"slack_notification_{slack_result.get('status', 'unknown')}"
+        if slack_result.get("status") == "sent":
+            self.state.status = IncidentStatus.SLACK_NOTIFIED.value
+            await self._update_status(
+                IncidentStatus.SLACK_NOTIFIED.value,
+                "Slack notification was sent for the RCA.",
+                {
+                    "channel": slack_result.get("channel"),
+                    "slack_message_id": slack_result.get("slack_message_id"),
+                },
+            )
+            await self._record_workflow_event(
+                "workflow.step.completed",
+                {"step": "slack_notification_sent"},
+            )
 
         while not self.state.completed:
             await workflow.wait_condition(lambda: bool(self._signals))
@@ -241,3 +260,25 @@ class IncidentWorkflow:
             start_to_close_timeout=AGENT_GRAPH_ACTIVITY_TIMEOUT,
             retry_policy=AGENT_GRAPH_RETRY_POLICY,
         )
+
+    async def _create_github_issue(self) -> dict[str, Any]:
+        if self.state is None:
+            return {"status": "skipped", "reason": "workflow state is unavailable"}
+        result = await workflow.execute_activity(
+            "incident_create_github_issue",
+            args=[self.state.incident_id],
+            start_to_close_timeout=EXTERNAL_ACTION_ACTIVITY_TIMEOUT,
+            retry_policy=ACTIVITY_RETRY_POLICY,
+        )
+        return dict(result or {})
+
+    async def _send_slack_notification(self) -> dict[str, Any]:
+        if self.state is None:
+            return {"status": "skipped", "reason": "workflow state is unavailable"}
+        result = await workflow.execute_activity(
+            "incident_send_slack_notification",
+            args=[self.state.incident_id],
+            start_to_close_timeout=EXTERNAL_ACTION_ACTIVITY_TIMEOUT,
+            retry_policy=ACTIVITY_RETRY_POLICY,
+        )
+        return dict(result or {})

@@ -390,6 +390,10 @@ AIRP_E2E_MIGRATE=0 AIRP_E2E_BUILD=0 ./scripts/run-e2e-kafka.sh
 AIRP_E2E_BUILD=0 ./scripts/run-e2e-kafka.sh --leave-workflow-open
 ```
 
+The E2E wrapper starts the alert consumer with a unique consumer group and
+`AIRP_KAFKA_AUTO_OFFSET_RESET=latest` so it consumes only alerts published during
+that run instead of replaying old messages from a shared live topic.
+
 ## Troubleshooting
 
 - `401 Missing bearer token`: send `Authorization: Bearer <token>`.

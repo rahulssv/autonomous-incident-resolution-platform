@@ -291,7 +291,11 @@ class GitHubMCPClient:
         issues = await self.lookup_prior_issues(repository_url, query=marker)
         for issue in issues:
             raw = issue.get("raw", {})
-            if marker in issue.get("title", "") or marker in str(raw):
+            if (
+                marker in issue.get("title", "")
+                or marker in issue.get("body", "")
+                or marker in str(raw)
+            ):
                 return issue
         return None
 
@@ -405,11 +409,41 @@ class GitHubMCPClient:
             ),
         )
 
-    async def create_issue(self, repository: str, title: str, body: str) -> dict[str, Any]:
-        _ = repository, title, body
-        raise NotImplementedError(
-            "GitHub issue creation remains disabled until approval and policy gates are implemented"
+    async def create_issue(
+        self,
+        repository: str,
+        title: str,
+        body: str,
+        *,
+        labels: list[str] | None = None,
+    ) -> dict[str, Any]:
+        if self.fixture is not None:
+            return {
+                "number": 9999,
+                "title": title,
+                "body": body,
+                "url": f"{repository.rstrip('/')}/issues/9999",
+                "state": "open",
+                "labels": labels or [],
+                "raw": {
+                    "html_url": f"{repository.rstrip('/')}/issues/9999",
+                    "fixture": True,
+                },
+            }
+        payload = await self._call_tool(
+            "github.create_issue",
+            {
+                "repository_url": repository,
+                "title": title,
+                "body": body,
+                "labels": labels or [],
+            },
         )
+        self._record_response_messages(payload)
+        issue = optional_dict(payload, "issue", "item")
+        if issue is None:
+            raise ValueError("GitHub MCP create issue response did not include an issue")
+        return issue
 
     async def create_pull_request(self, repository: str, payload: dict[str, Any]) -> dict[str, Any]:
         _ = repository, payload

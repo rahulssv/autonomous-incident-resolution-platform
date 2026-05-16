@@ -444,6 +444,43 @@ class IncidentService:
         await self.get_incident(incident_id)
         return await self._count_for_incident(GitHubArtifact, incident_id)
 
+    async def record_github_issue(
+        self,
+        incident_id: str,
+        *,
+        repository_url: str,
+        artifact_url: str,
+        external_id: str | None,
+        metadata: dict[str, Any],
+    ) -> GitHubArtifact:
+        incident = await self.get_incident(incident_id)
+        incident.github_issue_url = artifact_url
+        artifact = GitHubArtifact(
+            incident_id=incident_id,
+            artifact_type="issue",
+            repository_url=repository_url,
+            artifact_url=artifact_url,
+            external_id=external_id,
+            extra=metadata,
+        )
+        self.session.add(artifact)
+        self.session.add(
+            IncidentEvent(
+                incident_id=incident_id,
+                event_type="github.issue.created",
+                producer="github-mcp",
+                payload={
+                    "repository_url": repository_url,
+                    "artifact_url": artifact_url,
+                    "external_id": external_id,
+                    **metadata,
+                },
+            )
+        )
+        await self.session.commit()
+        await self.session.refresh(artifact)
+        return artifact
+
     async def list_slack_messages(
         self, incident_id: str, *, limit: int = 100, offset: int = 0
     ) -> list[SlackMessage]:
@@ -460,6 +497,45 @@ class IncidentService:
     async def count_slack_messages(self, incident_id: str) -> int:
         await self.get_incident(incident_id)
         return await self._count_for_incident(SlackMessage, incident_id)
+
+    async def record_slack_message(
+        self,
+        incident_id: str,
+        *,
+        channel: str,
+        message_ts: str | None,
+        thread_ts: str | None,
+        message_url: str | None,
+        payload: dict[str, Any],
+    ) -> SlackMessage:
+        incident = await self.get_incident(incident_id)
+        if message_url:
+            incident.slack_thread_url = message_url
+        message = SlackMessage(
+            incident_id=incident_id,
+            channel=channel,
+            message_ts=message_ts,
+            thread_ts=thread_ts,
+            message_url=message_url,
+            payload=payload,
+        )
+        self.session.add(message)
+        self.session.add(
+            IncidentEvent(
+                incident_id=incident_id,
+                event_type="slack.notification.sent",
+                producer="slack",
+                payload={
+                    "channel": channel,
+                    "message_ts": message_ts,
+                    "thread_ts": thread_ts,
+                    "message_url": message_url,
+                },
+            )
+        )
+        await self.session.commit()
+        await self.session.refresh(message)
+        return message
 
     async def create_incident_embedding(
         self,

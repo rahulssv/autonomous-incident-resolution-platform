@@ -9,7 +9,9 @@ from airp.core.config import get_settings
 from airp.core.logging import configure_logging, get_logger
 from airp.workflows.activities import (
     agent_graph_run,
+    incident_create_github_issue,
     incident_record_workflow_event,
+    incident_send_slack_notification,
     incident_update_status,
 )
 from airp.workflows.client import get_temporal_client
@@ -26,7 +28,13 @@ async def _run() -> None:
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[IncidentWorkflow],
-        activities=[incident_update_status, incident_record_workflow_event, agent_graph_run],
+        activities=[
+            incident_update_status,
+            incident_record_workflow_event,
+            agent_graph_run,
+            incident_create_github_issue,
+            incident_send_slack_notification,
+        ],
     )
 
     stop_event = asyncio.Event()
