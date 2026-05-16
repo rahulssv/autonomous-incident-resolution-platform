@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
-from airp.api.deps import CurrentPrincipal, DbSession
+from airp.api.deps import DbSession, ReadPrincipal
 from airp.api.responses import PAGINATED_LIST_RESPONSES
 from airp.schemas.common import Page
 from airp.schemas.incidents import SearchResult
@@ -18,7 +18,7 @@ router = APIRouter()
 )
 async def search_incidents(
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     q: Annotated[str, Query(min_length=2)],
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
     offset: Annotated[int, Query(ge=0)] = 0,

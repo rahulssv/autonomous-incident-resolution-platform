@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Query, status
 
-from airp.api.deps import CurrentPrincipal, DbSession
+from airp.api.deps import DbSession, ReadPrincipal, SREPrincipal
 from airp.schemas.common import OperatorCommandRead, Page
 from airp.schemas.incidents import (
     DocumentationReportRead,
@@ -114,7 +114,7 @@ DOCUMENTATION_REPUBLISH_RESPONSES = {
 async def create_incident(
     payload: IncidentCreate,
     session: DbSession,
-    principal: CurrentPrincipal,
+    principal: SREPrincipal,
 ) -> IncidentRead:
     incident = await IncidentService(session).create_incident(
         payload,
@@ -126,7 +126,7 @@ async def create_incident(
 @router.get("", response_model=Page[IncidentRead], responses=INCIDENT_ARTIFACT_PAGE_RESPONSES)
 async def list_incidents(
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     incident_status: Annotated[str | None, Query(alias="status")] = None,
     severity: str | None = None,
     service_id: str | None = None,
@@ -157,7 +157,7 @@ async def list_incidents(
 async def get_incident(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
 ) -> IncidentRead:
     incident = await IncidentService(session).get_incident(incident_id)
     return IncidentRead.model_validate(incident)
@@ -167,7 +167,7 @@ async def get_incident(
 async def get_timeline(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
 ) -> IncidentTimeline:
     service = IncidentService(session)
     incident = await service.get_incident(incident_id)
@@ -186,7 +186,7 @@ async def get_timeline(
 async def get_workflow_state(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
 ) -> IncidentWorkflowStateRead:
     service = IncidentService(session)
     incident = await service.get_incident(incident_id)
@@ -213,7 +213,7 @@ async def get_workflow_state(
 async def get_audit_events(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[IncidentEventRead]:
@@ -232,7 +232,7 @@ async def get_audit_events(
 async def export_audit_events(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
 ) -> IncidentAuditExportRead:
     service = IncidentService(session)
     incident = await service.get_incident(incident_id)
@@ -251,7 +251,7 @@ async def add_incident_event(
     incident_id: str,
     payload: IncidentEventCreate,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: SREPrincipal,
 ) -> IncidentEventRead:
     event = await IncidentService(session).add_event(incident_id, payload)
     return IncidentEventRead.model_validate(event)
@@ -262,7 +262,7 @@ async def signal_incident(
     incident_id: str,
     payload: IncidentSignal,
     session: DbSession,
-    principal: CurrentPrincipal,
+    principal: SREPrincipal,
 ) -> IncidentRead:
     incident = await IncidentService(session).signal_incident(
         incident_id,
@@ -277,7 +277,7 @@ async def signal_incident_workflow(
     incident_id: str,
     payload: WorkflowSignalRequest,
     session: DbSession,
-    principal: CurrentPrincipal,
+    principal: SREPrincipal,
 ) -> IncidentEventRead:
     incident_service = IncidentService(session)
     event = await IncidentWorkflowSignalService(incident_service).signal_workflow(
@@ -295,7 +295,7 @@ async def add_evidence(
     incident_id: str,
     payload: EvidenceItemCreate,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: SREPrincipal,
 ) -> EvidenceItemRead:
     evidence = await IncidentService(session).add_evidence(incident_id, payload)
     return EvidenceItemRead.model_validate(evidence)
@@ -309,7 +309,7 @@ async def add_evidence(
 async def list_evidence(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[EvidenceItemRead]:
@@ -332,7 +332,7 @@ async def list_evidence(
 async def list_tool_calls(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[ToolCallRead]:
@@ -355,7 +355,7 @@ async def list_tool_calls(
 async def list_rca_hypotheses(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[RCAHypothesisRead]:
@@ -378,7 +378,7 @@ async def list_rca_hypotheses(
 async def list_model_calls(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[ModelCallRead]:
@@ -401,7 +401,7 @@ async def list_model_calls(
 async def list_incident_embeddings(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[IncidentEmbeddingRead]:
@@ -425,7 +425,7 @@ async def create_remediation_plan(
     incident_id: str,
     payload: RemediationPlanCreate,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: SREPrincipal,
 ) -> RemediationPlanRead:
     plan = await IncidentService(session).create_remediation_plan(incident_id, payload)
     return RemediationPlanRead.model_validate(plan)
@@ -439,7 +439,7 @@ async def create_remediation_plan(
 async def list_remediation_plans(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[RemediationPlanRead]:
@@ -462,7 +462,7 @@ async def list_remediation_plans(
 async def list_documentation_reports(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[DocumentationReportRead]:
@@ -488,7 +488,7 @@ async def request_documentation_republish(
     report_id: str,
     payload: DocumentationRepublishRequest,
     session: DbSession,
-    principal: CurrentPrincipal,
+    principal: SREPrincipal,
 ) -> OperatorCommandRead:
     service = IncidentService(session)
     report = await service.get_documentation_report(incident_id, report_id)
@@ -533,7 +533,7 @@ async def request_documentation_republish(
 async def list_github_artifacts(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[GitHubArtifactRead]:
@@ -556,7 +556,7 @@ async def list_github_artifacts(
 async def list_slack_messages(
     incident_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[SlackMessageRead]:

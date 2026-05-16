@@ -42,7 +42,29 @@ AIRP_ENTRA_TENANT_ID=<tenant-id>
 AIRP_ENTRA_CLIENT_ID=<api-application-client-id>
 ```
 
-Tokens must be issued by the configured tenant and have `aud` equal to `AIRP_ENTRA_CLIENT_ID`.
+Tokens must be issued by the configured tenant and have:
+
+- `iss` equal to `https://login.microsoftonline.com/<tenant-id>/v2.0`
+- `aud` equal to `AIRP_ENTRA_CLIENT_ID`
+- required `exp`, `iat`, and `nbf` claims
+- `tid` equal to `AIRP_ENTRA_TENANT_ID`
+- `sub` or `oid` identifying the caller
+
+Configure these app roles on the AIRP API app registration:
+
+```text
+AIRP.Admin
+AIRP.SRE
+AIRP.Viewer
+AIRP.Approver
+```
+
+Route authorization is role-based:
+
+- `AIRP.Admin`: catalog writes, policy visibility, discovery refresh requests, and all SRE/approval powers.
+- `AIRP.SRE`: incident mutations, workflow signals, evidence writes, remediation plans, approval requests, and read access.
+- `AIRP.Approver`: approval decisions and read access.
+- `AIRP.Viewer`: read-only access.
 
 ## 4. Configure Azure Event Hubs Kafka Endpoint
 

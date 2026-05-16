@@ -1,6 +1,8 @@
 import asyncio
+import inspect
 from datetime import UTC, datetime
 
+from airp.api.deps import AdminPrincipal, ApproverPrincipal, ReadPrincipal, SREPrincipal
 from airp.core.middleware import CORRELATION_ID_HEADER, REQUEST_ID_HEADER
 from airp.domain.enums import IncidentStatus
 from airp.main import create_app
@@ -156,6 +158,24 @@ def test_core_list_routes_use_paginated_response_models() -> None:
 
     for path, response_model in expected_response_models.items():
         assert get_routes[path].response_model == response_model
+
+
+def test_route_role_dependency_wiring() -> None:
+    app = create_app()
+
+    assert _route_param_annotation(app, "POST", "/api/services") == AdminPrincipal
+    assert _route_param_annotation(app, "GET", "/api/services") == ReadPrincipal
+    assert _route_param_annotation(app, "GET", "/api/policy") == AdminPrincipal
+    assert _route_param_annotation(app, "POST", "/api/incidents") == SREPrincipal
+    assert (
+        _route_param_annotation(app, "POST", "/api/incidents/{incident_id}/workflow/signals")
+        == SREPrincipal
+    )
+    assert (
+        _route_param_annotation(app, "POST", "/api/approvals/{approval_id}/decision")
+        == ApproverPrincipal
+    )
+    assert _route_param_annotation(app, "GET", "/api/search/incidents") == ReadPrincipal
 
 
 def test_workflow_state_and_audit_export_schema_shape() -> None:
@@ -330,3 +350,12 @@ async def _call_asgi_get(path: str, *, headers: dict[str, str]) -> dict[str, str
 
     await asyncio.wait_for(app(scope, receive, send), timeout=5)
     return response_headers
+
+
+def _route_param_annotation(app, method: str, path: str):
+    for route in app.routes:
+        if route.path == path and method in getattr(route, "methods", set()):
+            parameters = inspect.signature(route.endpoint).parameters
+            parameter_name = "_" if "_" in parameters else "principal"
+            return parameters[parameter_name].annotation
+    raise AssertionError(f"{method} {path} was not registered")

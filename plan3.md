@@ -53,7 +53,7 @@ Still not production complete:
 - LangGraph supervisor MVP is implemented through Monitoring, Correlation, RCA evidence planning, RCA hypotheses, Remediation planning, Documentation drafting, and Embedding.
 - Live Kubernetes MCP, live GitHub MCP, Slack, approval UX, and governed repository-write behavior are not end-to-end.
 - PostgreSQL + pgvector has not been fully verified with migrations and integration tests.
-- Entra ID authorization roles are not production-grade yet.
+- Entra ID JWT validation now enforces issuer, audience, expiration, issued-at, not-before, tenant ID, subject, and route-level AIRP app roles; issuer discovery and JWKS caching/rotation still need production hardening.
 - Observability, security hardening, CI/CD, and AKS production deployment need to be finished.
 
 ## Verified Agent-Orchestration Status
@@ -81,7 +81,7 @@ Verified from the current repository on 2026-05-16:
 - Current Temporal workflow invokes a LangGraph supervisor through the `agent_graph_run` activity and persists RCA artifacts, proposed remediation plans, and documentation report drafts.
 - Current graph embedding output is persisted to `incident_embeddings`; pgvector conversion and semantic ranking remain pending.
 - Current GenAI Hub integration is used as an optional LLM/embedding adapter; RCA, Remediation, and Documentation prompt/model-call paths are implemented, while shared prompt loading and production evals are still pending.
-- Current verification baseline is `./scripts/verify.sh` with 80 passing tests.
+- Current verification baseline is `./scripts/verify.sh` with 91 passing tests.
 
 ## Remaining Work Summary
 
@@ -167,21 +167,21 @@ Goal: enforce enterprise authentication and role-based authorization.
 Tasks:
 
 - [x] Add Microsoft Entra ID JWT validator boundary.
-- [x] Validate configured Entra `aud`, `iss`, `exp`, and `iat` claims.
+- [x] Validate configured Entra `aud`, `iss`, `exp`, `iat`, `nbf`, `tid`, and subject claims.
 - [x] Extract principal subject, tenant, username, roles, and scopes.
 - [x] Add reusable role-check dependency helper.
 - [ ] Add issuer discovery from Entra `/.well-known/openid-configuration`.
 - [ ] Cache JWKS and refresh on key rotation.
-- [ ] Validate `nbf`, required `tid`, and required app roles.
-- [ ] Define app roles: `AIRP.Admin`, `AIRP.SRE`, `AIRP.Viewer`, `AIRP.Approver`.
-- [ ] Add route-level role dependencies.
-- [ ] Require Admin for catalog/admin operations.
-- [ ] Require SRE or Admin for incident mutation.
-- [ ] Require Approver or Admin for approval decisions.
-- [ ] Allow Viewer read-only access.
-- [ ] Add signed JWT fixtures for tests.
-- [ ] Test missing, expired, wrong-audience, wrong-issuer, and insufficient-role tokens.
-- [ ] Document Entra app registration, scopes, roles, and local token acquisition.
+- [x] Validate `nbf`, required `tid`, and required app roles.
+- [x] Define app roles: `AIRP.Admin`, `AIRP.SRE`, `AIRP.Viewer`, `AIRP.Approver`.
+- [x] Add route-level role dependencies.
+- [x] Require Admin for catalog/admin operations.
+- [x] Require SRE or Admin for incident mutation.
+- [x] Require Approver or Admin for approval decisions.
+- [x] Allow Viewer read-only access.
+- [x] Add signed JWT fixtures for tests.
+- [x] Test missing, expired, wrong-audience, wrong-issuer, wrong-tenant, missing-subject, and insufficient-role tokens.
+- [x] Document Entra app registration, enforced claims, scopes, roles, and local token acquisition.
 - [ ] Fail fast in production when auth config is missing.
 
 Acceptance criteria:
@@ -874,7 +874,8 @@ Highest-priority remaining engineering tasks:
 
 - [ ] Run all migrations, including incident idempotency and workflow ID migrations, against real PostgreSQL 16.
 - [ ] Add pgvector extension migration and convert incident embedding storage from JSON to vector.
-- [ ] Add Entra ID issuer discovery, JWKS caching, role validation, and route-level authorization.
+- [ ] Add Entra ID issuer discovery and JWKS caching/rotation behavior.
+- [x] Add route-level authorization for AIRP app roles.
 - [ ] Validate Event Hubs alert consumer and sample publisher against the real Azure Event Hubs Kafka endpoint.
 - [x] Add API readiness behavior for Kubernetes MCP, GitHub MCP, and DockerHub configuration.
 - [x] Add active readiness checks for PostgreSQL, Redis, Temporal, Event Hubs, GenAI Hub, Kubernetes MCP, GitHub MCP, and DockerHub.
@@ -942,11 +943,11 @@ Foundation and data:
 Authentication and authorization:
 
 - [ ] Add Entra issuer discovery and JWKS caching/rotation behavior.
-- [ ] Validate `nbf`, required `tid`, and required app roles.
-- [ ] Define and enforce `AIRP.Admin`, `AIRP.SRE`, `AIRP.Viewer`, and `AIRP.Approver`.
-- [ ] Add route-level RBAC for catalog/admin, incident mutation, approval decisions, and read-only access.
-- [ ] Add signed JWT fixtures and negative auth tests.
-- [ ] Document Entra app registration, scopes, roles, and local token acquisition.
+- [x] Validate `nbf`, required `tid`, and required app roles.
+- [x] Define and enforce `AIRP.Admin`, `AIRP.SRE`, `AIRP.Viewer`, and `AIRP.Approver` at route boundaries.
+- [x] Add route-level RBAC for catalog/admin, incident mutation, approval decisions, and read-only access.
+- [x] Add signed JWT fixtures and negative auth tests.
+- [x] Document Entra app registration, scopes, roles, and local token acquisition.
 
 Event Hubs and ingestion:
 
@@ -1333,18 +1334,54 @@ Verification:
 - `pytest tests/integration/test_backend_smoke.py -q` passes with 13 tests.
 - `./scripts/verify.sh` passes with 80 tests.
 
-## Immediate Next Sprint
+## Completed Sprint: Route-Level AIRP Role Authorization
 
 Sprint goal: start production authorization hardening beyond the current Entra JWT boundary.
 
 Tasks:
 
-1. [ ] Define shared AIRP role constants for `AIRP.Admin`, `AIRP.SRE`, `AIRP.Viewer`, and `AIRP.Approver`.
-2. [ ] Add route-level role dependencies to require Admin for catalog/policy-style operations.
-3. [ ] Require SRE/Admin for incident mutations and workflow signals.
-4. [ ] Require Approver/Admin for approval decisions.
-5. [ ] Keep read-only routes available to authenticated Viewer/SRE/Admin/Approver callers.
-6. [ ] Add tests for route dependency wiring and role helper behavior without requiring live Entra tokens.
+1. [x] Define shared AIRP role constants for `AIRP.Admin`, `AIRP.SRE`, `AIRP.Viewer`, and `AIRP.Approver`.
+2. [x] Add route-level role dependencies to require Admin for catalog/policy-style operations.
+3. [x] Require SRE/Admin for incident mutations and workflow signals.
+4. [x] Require Approver/Admin for approval decisions.
+5. [x] Keep read-only routes available to authenticated Viewer/SRE/Admin/Approver callers.
+6. [x] Add tests for route dependency wiring and role helper behavior without requiring live Entra tokens.
+
+Verification:
+
+- Focused `ruff check` for touched security, dependency, route, and test files passes.
+- Focused role/security and backend smoke tests pass with 16 tests.
+- `./scripts/verify.sh` passes with 83 tests.
+
+## Completed Sprint: Entra Token Claim Hardening
+
+Sprint goal: harden Microsoft Entra token validation with concrete claim checks and deterministic JWT fixtures.
+
+Tasks:
+
+1. [x] Require and validate `nbf` on Entra access tokens.
+2. [x] Validate token `tid` against configured `AIRP_ENTRA_TENANT_ID`.
+3. [x] Add signed JWT test fixtures for valid, expired, wrong-audience, wrong-issuer, wrong-tenant, missing-subject, and insufficient-role scenarios.
+4. [x] Keep live issuer discovery and JWKS rotation pending for the next auth-hardening sprint.
+5. [x] Document the enforced token claims in the deployment/auth guide.
+
+Verification:
+
+- Focused `ruff check` for touched security, JWT fixture tests, and deployment docs passes.
+- Focused auth tests pass with 24 tests.
+- `./scripts/verify.sh` passes with 91 tests.
+
+## Immediate Next Sprint
+
+Sprint goal: add Microsoft Entra issuer discovery and JWKS caching/rotation behavior without weakening the current strict claim checks.
+
+Tasks:
+
+1. [ ] Add Entra OpenID configuration discovery from `/.well-known/openid-configuration`.
+2. [ ] Cache discovered issuer and JWKS URI with bounded TTL.
+3. [ ] Refresh JWKS metadata on key lookup failure to handle key rotation.
+4. [ ] Add tests for discovery success, discovery failure, cached reuse, and key-rotation refresh.
+5. [ ] Document production behavior and operational failure modes.
 
 ## Verified Remaining Critical Path
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, status
 
-from airp.api.deps import CurrentPrincipal, DbSession
+from airp.api.deps import ApproverPrincipal, DbSession, SREPrincipal
 from airp.schemas.incidents import ApprovalCreate, ApprovalDecisionCreate, ApprovalRead
 from airp.services.approval_service import ApprovalService
 
@@ -16,7 +16,7 @@ async def request_approval(
     incident_id: str,
     payload: ApprovalCreate,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: SREPrincipal,
 ) -> ApprovalRead:
     approval = await ApprovalService(session).request_approval(incident_id, payload)
     return ApprovalRead.model_validate(approval)
@@ -27,7 +27,7 @@ async def decide_approval(
     approval_id: str,
     payload: ApprovalDecisionCreate,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ApproverPrincipal,
 ) -> ApprovalRead:
     approval = await ApprovalService(session).decide(approval_id, payload)
     return ApprovalRead.model_validate(approval)

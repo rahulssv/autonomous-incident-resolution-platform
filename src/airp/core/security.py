@@ -12,6 +12,19 @@ from airp.core.config import Settings, get_settings
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
+AIRP_ADMIN_ROLE = "AIRP.Admin"
+AIRP_SRE_ROLE = "AIRP.SRE"
+AIRP_VIEWER_ROLE = "AIRP.Viewer"
+AIRP_APPROVER_ROLE = "AIRP.Approver"
+AIRP_READ_ROLES = (
+    AIRP_ADMIN_ROLE,
+    AIRP_SRE_ROLE,
+    AIRP_VIEWER_ROLE,
+    AIRP_APPROVER_ROLE,
+)
+AIRP_SRE_ROLES = (AIRP_ADMIN_ROLE, AIRP_SRE_ROLE)
+AIRP_APPROVER_ROLES = (AIRP_ADMIN_ROLE, AIRP_APPROVER_ROLE)
+
 
 class Principal(BaseModel):
     """Authenticated Microsoft Entra ID caller."""
@@ -55,7 +68,7 @@ class EntraJWTValidator:
                 signing_key.key,
                 algorithms=["RS256"],
                 audience=self.settings.entra_client_id,
-                options={"require": ["exp", "iat"], "verify_iss": False},
+                options={"require": ["exp", "iat", "nbf"], "verify_iss": False},
             )
         except jwt.PyJWTError as exc:
             raise HTTPException(
@@ -68,6 +81,13 @@ class EntraJWTValidator:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Access token issuer is not allowed",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if claims.get("tid") != self.settings.entra_tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Access token tenant is not allowed",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 

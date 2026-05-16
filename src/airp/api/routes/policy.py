@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from airp.api.deps import CurrentPrincipal
+from airp.api.deps import AdminPrincipal
 from airp.core.config import Settings, get_settings
 from airp.schemas.policy import EffectivePolicyRead
 from airp.services.policy_service import build_effective_policy
@@ -63,7 +63,7 @@ POLICY_RESPONSES = {
 
 @router.get("/policy", response_model=EffectivePolicyRead, responses=POLICY_RESPONSES)
 async def get_policy(
-    _: CurrentPrincipal,
+    _: AdminPrincipal,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> EffectivePolicyRead:
     return build_effective_policy(settings)

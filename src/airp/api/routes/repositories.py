@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, status
 
-from airp.api.deps import CurrentPrincipal, DbSession
+from airp.api.deps import AdminPrincipal, DbSession, ReadPrincipal
 from airp.api.responses import PAGINATED_LIST_RESPONSES
 from airp.schemas.catalog import RepositoryCreate, RepositoryRead
 from airp.schemas.common import Page
@@ -15,7 +15,7 @@ router = APIRouter()
 async def create_repository(
     payload: RepositoryCreate,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: AdminPrincipal,
 ) -> RepositoryRead:
     repository = await CatalogService(session).create_repository(payload)
     return RepositoryRead.model_validate(repository)
@@ -24,7 +24,7 @@ async def create_repository(
 @router.get("", response_model=Page[RepositoryRead], responses=PAGINATED_LIST_RESPONSES)
 async def list_repositories(
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[RepositoryRead]:

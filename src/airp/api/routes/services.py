@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Query, status
 
-from airp.api.deps import CurrentPrincipal, DbSession
+from airp.api.deps import AdminPrincipal, DbSession, ReadPrincipal
 from airp.api.responses import PAGINATED_LIST_RESPONSES
 from airp.schemas.catalog import DiscoveryRefreshRequest, ServiceCreate, ServiceRead
 from airp.schemas.common import OperatorCommandRead, Page
@@ -36,7 +36,7 @@ DISCOVERY_REFRESH_RESPONSES = {
 async def create_service(
     payload: ServiceCreate,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: AdminPrincipal,
 ) -> ServiceRead:
     service = await CatalogService(session).create_service(payload)
     return ServiceRead.model_validate(service)
@@ -45,7 +45,7 @@ async def create_service(
 @router.get("", response_model=Page[ServiceRead], responses=PAGINATED_LIST_RESPONSES)
 async def list_services(
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
     environment: str | None = None,
     namespace: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
@@ -72,7 +72,7 @@ async def list_services(
 async def request_discovery_refresh(
     payload: DiscoveryRefreshRequest,
     _: DbSession,
-    principal: CurrentPrincipal,
+    principal: AdminPrincipal,
 ) -> OperatorCommandRead:
     return OperatorCommandRead(
         operation_id=f"discovery-refresh-{uuid4()}",
@@ -94,7 +94,7 @@ async def request_discovery_refresh(
 async def get_service(
     service_id: str,
     session: DbSession,
-    _: CurrentPrincipal,
+    _: ReadPrincipal,
 ) -> ServiceRead:
     service = await CatalogService(session).get_service(service_id)
     return ServiceRead.model_validate(service)
