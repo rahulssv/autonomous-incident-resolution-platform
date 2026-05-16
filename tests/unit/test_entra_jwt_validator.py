@@ -20,11 +20,28 @@ class FakeSigningKey:
 
 
 class FakeJwksClient:
-    def __init__(self, key) -> None:
+    def __init__(self, key, *, fail_once: bool = False) -> None:
         self.signing_key = FakeSigningKey(key)
+        self.fail_once = fail_once
 
     def get_signing_key_from_jwt(self, token: str) -> FakeSigningKey:
+        if self.fail_once:
+            self.fail_once = False
+            raise jwt.PyJWKClientError("missing signing key")
         return self.signing_key
+
+
+class FakeDiscoveryFetcher:
+    def __init__(self, payload: dict | None = None, *, fail: bool = False) -> None:
+        self.payload = payload
+        self.fail = fail
+        self.calls: list[tuple[str, float]] = []
+
+    def __call__(self, url: str, timeout: float) -> dict:
+        self.calls.append((url, timeout))
+        if self.fail:
+            raise OSError("discovery unavailable")
+        return self.payload or {}
 
 
 def test_entra_validator_accepts_valid_signed_token() -> None:
@@ -35,6 +52,42 @@ def test_entra_validator_accepts_valid_signed_token() -> None:
     assert principal.subject == "user-123"
     assert principal.tenant_id == "tenant-123"
     assert principal.roles == [AIRP_VIEWER_ROLE]
+
+
+def test_entra_validator_discovers_openid_configuration_once_when_cache_is_fresh() -> None:
+    validator, token, discovery, _ = _validator_and_token(with_discovery=True)
+
+    validator.validate(token)
+    validator.validate(token)
+
+    assert len(discovery.calls) == 1
+    assert discovery.calls[0][0].endswith("/.well-known/openid-configuration")
+
+
+def test_entra_validator_discovery_failure_returns_service_unavailable() -> None:
+    validator, token = _validator_and_token(discovery_failure=True)
+
+    with pytest.raises(HTTPException) as exc:
+        validator.validate(token)
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "Microsoft Entra ID discovery failed"
+
+
+def test_entra_validator_refreshes_discovery_and_jwks_after_key_lookup_failure() -> None:
+    validator, token, discovery, factory_calls = _validator_and_token(
+        with_discovery=True,
+        fail_first_jwks_lookup=True,
+    )
+
+    principal = validator.validate(token)
+
+    assert principal.subject == "user-123"
+    assert len(discovery.calls) == 2
+    assert factory_calls == [
+        "https://login.microsoftonline.com/tenant-123/discovery/v2.0/keys",
+        "https://login.microsoftonline.com/tenant-123/discovery/v2.0/keys",
+    ]
 
 
 def test_entra_validator_rejects_expired_token() -> None:
@@ -112,11 +165,14 @@ async def test_valid_viewer_token_fails_admin_role_dependency() -> None:
 def _validator_and_token(
     *,
     audience: str | None = None,
+    discovery_failure: bool = False,
     expired: bool = False,
+    fail_first_jwks_lookup: bool = False,
     issuer: str | None = None,
     tenant_id: str = "tenant-123",
     omit_claims: set[str] | None = None,
-) -> tuple[EntraJWTValidator, str]:
+    with_discovery: bool = False,
+):
     settings = Settings(
         entra_tenant_id="tenant-123",
         entra_client_id="api://airp-test",
@@ -137,6 +193,27 @@ def _validator_and_token(
         claims.pop(claim, None)
 
     token = jwt.encode(claims, key, algorithm="RS256", headers={"kid": "test-key"})
-    validator = EntraJWTValidator(settings)
-    validator.jwks_client = FakeJwksClient(key.public_key())
+    discovery = FakeDiscoveryFetcher(
+        {
+            "issuer": settings.entra_issuer,
+            "jwks_uri": "https://login.microsoftonline.com/tenant-123/discovery/v2.0/keys",
+        },
+        fail=discovery_failure,
+    )
+    factory_calls = []
+
+    def jwks_client_factory(jwks_uri: str) -> FakeJwksClient:
+        factory_calls.append(jwks_uri)
+        return FakeJwksClient(
+            key.public_key(),
+            fail_once=fail_first_jwks_lookup and len(factory_calls) == 1,
+        )
+
+    validator = EntraJWTValidator(
+        settings,
+        discovery_fetcher=discovery,
+        jwks_client_factory=jwks_client_factory,
+    )
+    if with_discovery:
+        return validator, token, discovery, factory_calls
     return validator, token

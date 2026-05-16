@@ -1,6 +1,10 @@
-from datetime import UTC, datetime
+import json
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Any
+from urllib.request import urlopen
 
 import jwt
 from fastapi import Depends, HTTPException, Security, status
@@ -26,6 +30,13 @@ AIRP_SRE_ROLES = (AIRP_ADMIN_ROLE, AIRP_SRE_ROLE)
 AIRP_APPROVER_ROLES = (AIRP_ADMIN_ROLE, AIRP_APPROVER_ROLE)
 
 
+@dataclass(frozen=True)
+class EntraDiscoveryMetadata:
+    issuer: str
+    jwks_uri: str
+    fetched_at: datetime
+
+
 class Principal(BaseModel):
     """Authenticated Microsoft Entra ID caller."""
 
@@ -42,27 +53,31 @@ class Principal(BaseModel):
 
 
 class EntraJWTValidator:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        discovery_fetcher: Callable[[str, float], dict[str, Any]] | None = None,
+        jwks_client_factory: Callable[[str], PyJWKClient] = PyJWKClient,
+    ) -> None:
         self.settings = settings
-        if settings.entra_jwks_url:
-            self.jwks_client = PyJWKClient(settings.entra_jwks_url)
-        else:
-            self.jwks_client = None
+        self.discovery_fetcher = discovery_fetcher or _fetch_openid_configuration
+        self.jwks_client_factory = jwks_client_factory
+        self.discovery_metadata: EntraDiscoveryMetadata | None = None
+        self.jwks_client: PyJWKClient | None = None
 
     def validate(self, token: str) -> Principal:
-        if (
-            not self.settings.entra_client_id
-            or not self.settings.entra_issuer
-            or not self.jwks_client
-        ):
+        if not self.settings.entra_client_id or not self.settings.entra_issuer:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Microsoft Entra ID authentication is not configured",
             )
 
+        metadata = self._get_discovery_metadata()
+        jwks_client = self._get_jwks_client(metadata)
         try:
-            signing_key = self.jwks_client.get_signing_key_from_jwt(token)
-            allowed_issuers = self.settings.entra_allowed_issuers or [self.settings.entra_issuer]
+            signing_key = self._get_signing_key(token, jwks_client)
+            allowed_issuers = self.settings.entra_allowed_issuers or [metadata.issuer]
             claims = jwt.decode(
                 token,
                 signing_key.key,
@@ -117,6 +132,58 @@ class EntraJWTValidator:
             scopes=scopes.split() if isinstance(scopes, str) else list(scopes or []),
             claims=claims,
         )
+
+    def _get_signing_key(self, token: str, jwks_client: PyJWKClient):
+        try:
+            return jwks_client.get_signing_key_from_jwt(token)
+        except jwt.PyJWKClientError:
+            metadata = self._get_discovery_metadata(force_refresh=True)
+            jwks_client = self._get_jwks_client(metadata, force_refresh=True)
+            return jwks_client.get_signing_key_from_jwt(token)
+
+    def _get_discovery_metadata(self, *, force_refresh: bool = False) -> EntraDiscoveryMetadata:
+        if (
+            not force_refresh
+            and self.discovery_metadata is not None
+            and self.discovery_metadata.fetched_at
+            + timedelta(seconds=self.settings.entra_discovery_cache_ttl_seconds)
+            > datetime.now(UTC)
+        ):
+            return self.discovery_metadata
+
+        discovery_url = f"{self.settings.entra_issuer}/.well-known/openid-configuration"
+        try:
+            payload = self.discovery_fetcher(
+                discovery_url,
+                self.settings.entra_discovery_timeout_seconds,
+            )
+            issuer = payload["issuer"]
+            jwks_uri = payload["jwks_uri"]
+        except (KeyError, TypeError, ValueError, OSError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Microsoft Entra ID discovery failed",
+            ) from exc
+
+        self.discovery_metadata = EntraDiscoveryMetadata(
+            issuer=str(issuer),
+            jwks_uri=str(jwks_uri),
+            fetched_at=datetime.now(UTC),
+        )
+        self.jwks_client = None
+        return self.discovery_metadata
+
+    def _get_jwks_client(
+        self, metadata: EntraDiscoveryMetadata, *, force_refresh: bool = False
+    ) -> PyJWKClient:
+        if self.jwks_client is None or force_refresh:
+            self.jwks_client = self.jwks_client_factory(metadata.jwks_uri)
+        return self.jwks_client
+
+
+def _fetch_openid_configuration(url: str, timeout: float) -> dict[str, Any]:
+    with urlopen(url, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 @lru_cache

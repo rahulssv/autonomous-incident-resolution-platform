@@ -40,6 +40,8 @@ Required runtime values:
 ```text
 AIRP_ENTRA_TENANT_ID=<tenant-id>
 AIRP_ENTRA_CLIENT_ID=<api-application-client-id>
+AIRP_ENTRA_DISCOVERY_CACHE_TTL_SECONDS=3600
+AIRP_ENTRA_DISCOVERY_TIMEOUT_SECONDS=5
 ```
 
 Tokens must be issued by the configured tenant and have:
@@ -66,7 +68,34 @@ Route authorization is role-based:
 - `AIRP.Approver`: approval decisions and read access.
 - `AIRP.Viewer`: read-only access.
 
-## 4. Configure Azure Event Hubs Kafka Endpoint
+At runtime AIRP discovers the Entra OpenID configuration from:
+
+```text
+https://login.microsoftonline.com/<tenant-id>/v2.0/.well-known/openid-configuration
+```
+
+The discovered issuer and JWKS URI are cached for
+`AIRP_ENTRA_DISCOVERY_CACHE_TTL_SECONDS`. If signing-key lookup fails, AIRP refreshes
+the discovery metadata and JWKS client once to tolerate Entra key rotation. If
+discovery is unavailable or malformed, protected APIs return `503` until discovery
+succeeds again.
+
+## 4. Configure API HTTP Hardening
+
+AIRP adds request and correlation IDs, rejects oversized request bodies, and returns
+baseline API security headers on HTTP responses.
+
+Runtime values:
+
+```text
+AIRP_API_MAX_REQUEST_BODY_BYTES=1048576
+```
+
+The default request body limit is 1 MiB. Increase it only for a specific operational
+need, such as larger webhook payloads, and keep any upstream ingress or API gateway
+limit aligned with this setting.
+
+## 5. Configure Azure Event Hubs Kafka Endpoint
 
 Create an Event Hubs namespace and event hub topics that match the AIRP Kafka topic plan.
 
@@ -85,7 +114,7 @@ AIRP_KAFKA_ALERT_CONSUMER_GROUP=airp-alert-consumer
 
 Store `AIRP_KAFKA_PASSWORD` in Kubernetes Secret only.
 
-## 5. Configure GenAI Hub
+## 6. Configure GenAI Hub
 
 Runtime values:
 
@@ -96,7 +125,7 @@ AIRP_GATEWAY_API_KEY=<secret>
 
 Store `AIRP_GATEWAY_API_KEY` in Kubernetes Secret only.
 
-## 6. Configure Read-Only Evidence Integrations
+## 7. Configure Read-Only Evidence Integrations
 
 AIRP can collect RCA evidence from Kubernetes MCP, GitHub MCP, and public DockerHub
 metadata when read-only evidence is enabled.
@@ -162,7 +191,7 @@ readiness probes unless the target dependencies can tolerate periodic active che
 Use `?active=true` for operator diagnostics or enable the flag in environments where
 active readiness should gate traffic.
 
-## 7. Database and Redis
+## 8. Database and Redis
 
 For production, use managed or cluster-hosted PostgreSQL with pgvector enabled and a production Redis instance.
 
@@ -172,7 +201,7 @@ Apply migrations:
 AIRP_DATABASE_URL=postgresql+asyncpg://<user>:<password>@<host>:5432/<db> alembic upgrade head
 ```
 
-## 8. Configure Temporal
+## 9. Configure Temporal
 
 Runtime values:
 
@@ -195,7 +224,7 @@ In production, deploy it as a separate worker Deployment using:
 python -m airp.workers.temporal_worker
 ```
 
-## 9. Helm Deploy
+## 10. Helm Deploy
 
 Create a production values file, for example `deploy/helm/airp/prod-values.yaml`:
 
@@ -208,6 +237,7 @@ env:
   AIRP_ENVIRONMENT: production
   AIRP_DATABASE_URL: postgresql+asyncpg://<user>:<password>@<host>:5432/<db>
   AIRP_REDIS_URL: redis://<host>:6379/0
+  AIRP_API_MAX_REQUEST_BODY_BYTES: "1048576"
   AIRP_ENTRA_TENANT_ID: <tenant-id>
   AIRP_ENTRA_CLIENT_ID: <client-id>
   AIRP_KAFKA_BOOTSTRAP_SERVERS: <namespace>.servicebus.windows.net:9093

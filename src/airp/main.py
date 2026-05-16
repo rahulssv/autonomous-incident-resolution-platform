@@ -8,7 +8,9 @@ from airp.core.logging import configure_logging
 from airp.core.middleware import (
     CORRELATION_ID_HEADER,
     REQUEST_ID_HEADER,
+    RequestBodyLimitMiddleware,
     RequestCorrelationIdMiddleware,
+    SecurityHeadersMiddleware,
 )
 
 
@@ -22,6 +24,10 @@ def create_app() -> FastAPI:
         docs_url="/docs" if settings.environment != "production" else None,
         redoc_url="/redoc" if settings.environment != "production" else None,
         openapi_url="/openapi.json" if settings.environment != "production" else None,
+    )
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_body_bytes=settings.api_max_request_body_bytes,
     )
     app.add_middleware(RequestCorrelationIdMiddleware)
 
@@ -39,6 +45,7 @@ def create_app() -> FastAPI:
             ],
             expose_headers=[REQUEST_ID_HEADER, CORRELATION_ID_HEADER],
         )
+    app.add_middleware(SecurityHeadersMiddleware)
 
     register_error_handlers(app)
     app.include_router(api_router, prefix=settings.api_prefix)

@@ -3,7 +3,13 @@ import inspect
 from datetime import UTC, datetime
 
 from airp.api.deps import AdminPrincipal, ApproverPrincipal, ReadPrincipal, SREPrincipal
-from airp.core.middleware import CORRELATION_ID_HEADER, REQUEST_ID_HEADER
+from airp.core.middleware import (
+    CORRELATION_ID_HEADER,
+    REQUEST_ID_HEADER,
+    SECURITY_HEADERS,
+    RequestBodyLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
 from airp.domain.enums import IncidentStatus
 from airp.main import create_app
 from airp.schemas.catalog import (
@@ -79,6 +85,60 @@ def test_request_and_correlation_headers_are_returned() -> None:
 
     assert response_headers[REQUEST_ID_HEADER.lower()] == "req-test-123"
     assert response_headers[CORRELATION_ID_HEADER.lower()] == "corr-test-456"
+
+
+def test_security_headers_are_returned() -> None:
+    response_headers = asyncio.run(_call_asgi_get("/", headers={}))
+
+    for name, value in SECURITY_HEADERS.items():
+        assert response_headers[name.lower()] == value
+
+
+def test_app_wires_production_http_hardening_middleware() -> None:
+    app = create_app()
+    middleware_classes = {middleware.cls for middleware in app.user_middleware}
+
+    assert RequestBodyLimitMiddleware in middleware_classes
+    assert SecurityHeadersMiddleware in middleware_classes
+
+
+def test_request_body_limit_allows_normal_request() -> None:
+    app = RequestBodyLimitMiddleware(_body_echo_app, max_body_bytes=32)
+
+    status_code, response_headers, response_body = asyncio.run(
+        _call_asgi_request(
+            app,
+            method="POST",
+            path="/echo",
+            headers={"content-type": "application/json"},
+            body=b'{"ok": true}',
+        )
+    )
+
+    assert status_code == 200
+    assert response_headers["content-type"] == "application/json"
+    assert response_body == b'{"received": 12}'
+
+
+def test_request_body_limit_rejects_oversized_request() -> None:
+    app = SecurityHeadersMiddleware(
+        RequestBodyLimitMiddleware(_body_echo_app, max_body_bytes=8)
+    )
+
+    status_code, response_headers, response_body = asyncio.run(
+        _call_asgi_request(
+            app,
+            method="POST",
+            path="/echo",
+            headers={"content-type": "application/json"},
+            body=b'{"too_large": true}',
+        )
+    )
+
+    assert status_code == 413
+    assert response_headers["content-type"] == "application/json"
+    assert response_headers["x-frame-options"] == "DENY"
+    assert b"request_body_too_large" in response_body
 
 
 def test_incident_artifact_routes_use_paginated_response_models() -> None:
@@ -316,15 +376,64 @@ def test_incident_embedding_schema_accepts_json_backed_vectors() -> None:
 
 
 async def _call_asgi_get(path: str, *, headers: dict[str, str]) -> dict[str, str]:
-    app = create_app()
+    status_code, response_headers, _ = await _call_asgi_request(
+        create_app(),
+        method="GET",
+        path=path,
+        headers=headers,
+    )
+    assert status_code == 200
+    return response_headers
+
+
+async def _body_echo_app(scope, receive, send) -> None:
+    body_size = 0
+    more_body = True
+    while more_body:
+        message = await receive()
+        body = message.get("body", b"")
+        if isinstance(body, bytes):
+            body_size += len(body)
+        more_body = bool(message.get("more_body", False))
+
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
+    await send(
+        {
+            "type": "http.response.body",
+            "body": f'{{"received": {body_size}}}'.encode(),
+            "more_body": False,
+        }
+    )
+
+
+async def _call_asgi_request(
+    app,
+    *,
+    method: str,
+    path: str,
+    headers: dict[str, str],
+    body: bytes = b"",
+) -> tuple[int, dict[str, str], bytes]:
     response_headers: dict[str, str] = {}
+    response_status = 0
+    response_body = bytearray()
     request_sent = False
-    raw_headers = [(name.lower().encode(), value.encode()) for name, value in headers.items()]
+    request_headers = dict(headers)
+    request_headers.setdefault("content-length", str(len(body)))
+    raw_headers = [
+        (name.lower().encode(), value.encode()) for name, value in request_headers.items()
+    ]
     scope = {
         "type": "http",
         "asgi": {"version": "3.0"},
         "http_version": "1.1",
-        "method": "GET",
+        "method": method,
         "scheme": "http",
         "path": path,
         "raw_path": path.encode(),
@@ -339,17 +448,23 @@ async def _call_asgi_get(path: str, *, headers: dict[str, str]) -> dict[str, str
         nonlocal request_sent
         if not request_sent:
             request_sent = True
-            return {"type": "http.request", "body": b"", "more_body": False}
+            return {"type": "http.request", "body": body, "more_body": False}
         await asyncio.sleep(0)
         return {"type": "http.disconnect"}
 
     async def send(message: dict[str, object]) -> None:
+        nonlocal response_status
         if message["type"] == "http.response.start":
+            response_status = int(message["status"])
             for name, value in message["headers"]:
                 response_headers[name.decode()] = value.decode()
+        if message["type"] == "http.response.body":
+            body_chunk = message.get("body", b"")
+            if isinstance(body_chunk, bytes):
+                response_body.extend(body_chunk)
 
     await asyncio.wait_for(app(scope, receive, send), timeout=5)
-    return response_headers
+    return response_status, response_headers, bytes(response_body)
 
 
 def _route_param_annotation(app, method: str, path: str):

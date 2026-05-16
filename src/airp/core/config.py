@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_prefix: str = "/api"
     allowed_origins: list[str] = Field(default_factory=list)
+    api_max_request_body_bytes: int = Field(default=1_048_576, ge=1024)
 
     database_url: str = "postgresql+asyncpg://airp:airp@localhost:5432/airp"
     redis_url: str = "redis://localhost:6379/0"
@@ -29,6 +30,8 @@ class Settings(BaseSettings):
     entra_tenant_id: str | None = None
     entra_client_id: str | None = None
     entra_allowed_issuers: list[str] = Field(default_factory=list)
+    entra_discovery_cache_ttl_seconds: int = Field(default=3600, ge=60)
+    entra_discovery_timeout_seconds: float = Field(default=5.0, gt=0.0)
 
     gateway_base_url: AnyHttpUrl | None = None
     gateway_api_key: str | None = None

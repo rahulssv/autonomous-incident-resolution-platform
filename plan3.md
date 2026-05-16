@@ -35,6 +35,8 @@ Already implemented:
 - Read APIs for remediation plans, documentation report drafts, GitHub artifacts, and Slack messages.
 - Read API for persisted incident graph embeddings with safe vector metadata.
 - Request/correlation ID middleware with response headers and CORS exposure.
+- API request body limit middleware with configurable maximum size and `413` responses for oversized requests.
+- Baseline API security response headers.
 - Generic paginated response schema and total-count pagination for incident artifact, audit, catalog, repository, workload, incident search, and incident list APIs.
 - Read-only effective policy API for disabled-by-default external actions, repository/namespace allowlists, and MCP read settings with secrets redacted.
 - Disabled-by-default external action policy flags and shared artifact idempotency helper for future GitHub, Slack, PR, and documentation writes.
@@ -53,7 +55,7 @@ Still not production complete:
 - LangGraph supervisor MVP is implemented through Monitoring, Correlation, RCA evidence planning, RCA hypotheses, Remediation planning, Documentation drafting, and Embedding.
 - Live Kubernetes MCP, live GitHub MCP, Slack, approval UX, and governed repository-write behavior are not end-to-end.
 - PostgreSQL + pgvector has not been fully verified with migrations and integration tests.
-- Entra ID JWT validation now enforces issuer, audience, expiration, issued-at, not-before, tenant ID, subject, and route-level AIRP app roles; issuer discovery and JWKS caching/rotation still need production hardening.
+- Entra ID JWT validation now enforces issuer, audience, expiration, issued-at, not-before, tenant ID, subject, and route-level AIRP app roles, with OpenID discovery, JWKS cache reuse, and key-rotation refresh behavior.
 - Observability, security hardening, CI/CD, and AKS production deployment need to be finished.
 
 ## Verified Agent-Orchestration Status
@@ -81,7 +83,7 @@ Verified from the current repository on 2026-05-16:
 - Current Temporal workflow invokes a LangGraph supervisor through the `agent_graph_run` activity and persists RCA artifacts, proposed remediation plans, and documentation report drafts.
 - Current graph embedding output is persisted to `incident_embeddings`; pgvector conversion and semantic ranking remain pending.
 - Current GenAI Hub integration is used as an optional LLM/embedding adapter; RCA, Remediation, and Documentation prompt/model-call paths are implemented, while shared prompt loading and production evals are still pending.
-- Current verification baseline is `./scripts/verify.sh` with 91 passing tests.
+- Current verification baseline is `./scripts/verify.sh` with 98 passing tests.
 
 ## Remaining Work Summary
 
@@ -147,6 +149,8 @@ Tasks:
 - [ ] Add optimistic concurrency checks for approval-sensitive writes.
 - [x] Add request ID and correlation ID middleware.
 - [x] Return request/correlation IDs in every API response.
+- [x] Add configurable request body size limit middleware.
+- [x] Add baseline API security response headers.
 - [ ] Add structured audit event creation to every mutating API route.
 - [ ] Add OpenAPI examples for key request and response models.
 - [ ] Add PostgreSQL integration test profile using Docker Compose.
@@ -170,8 +174,8 @@ Tasks:
 - [x] Validate configured Entra `aud`, `iss`, `exp`, `iat`, `nbf`, `tid`, and subject claims.
 - [x] Extract principal subject, tenant, username, roles, and scopes.
 - [x] Add reusable role-check dependency helper.
-- [ ] Add issuer discovery from Entra `/.well-known/openid-configuration`.
-- [ ] Cache JWKS and refresh on key rotation.
+- [x] Add issuer discovery from Entra `/.well-known/openid-configuration`.
+- [x] Cache JWKS and refresh on key rotation.
 - [x] Validate `nbf`, required `tid`, and required app roles.
 - [x] Define app roles: `AIRP.Admin`, `AIRP.SRE`, `AIRP.Viewer`, `AIRP.Approver`.
 - [x] Add route-level role dependencies.
@@ -682,10 +686,10 @@ Tasks:
 - [ ] Add dependency vulnerability scanning.
 - [ ] Add container image scanning.
 - [ ] Add SBOM generation.
-- [ ] Add request body size limits.
+- [x] Add request body size limits.
 - [ ] Add rate limiting for public and protected endpoints.
 - [ ] Add strict production CORS allowlist.
-- [ ] Add response security headers.
+- [x] Add response security headers.
 - [ ] Add audit trail coverage checks.
 - [x] Add redaction before GenAI Hub chat and embedding requests.
 - [x] Add redaction before RCA Kubernetes/GitHub/DockerHub evidence storage.
@@ -874,7 +878,7 @@ Highest-priority remaining engineering tasks:
 
 - [ ] Run all migrations, including incident idempotency and workflow ID migrations, against real PostgreSQL 16.
 - [ ] Add pgvector extension migration and convert incident embedding storage from JSON to vector.
-- [ ] Add Entra ID issuer discovery and JWKS caching/rotation behavior.
+- [x] Add Entra ID issuer discovery and JWKS caching/rotation behavior.
 - [x] Add route-level authorization for AIRP app roles.
 - [ ] Validate Event Hubs alert consumer and sample publisher against the real Azure Event Hubs Kafka endpoint.
 - [x] Add API readiness behavior for Kubernetes MCP, GitHub MCP, and DockerHub configuration.
@@ -942,7 +946,7 @@ Foundation and data:
 
 Authentication and authorization:
 
-- [ ] Add Entra issuer discovery and JWKS caching/rotation behavior.
+- [x] Add Entra issuer discovery and JWKS caching/rotation behavior.
 - [x] Validate `nbf`, required `tid`, and required app roles.
 - [x] Define and enforce `AIRP.Admin`, `AIRP.SRE`, `AIRP.Viewer`, and `AIRP.Approver` at route boundaries.
 - [x] Add route-level RBAC for catalog/admin, incident mutation, approval decisions, and read-only access.
@@ -1029,7 +1033,8 @@ Operations, security, deployment, and handoff:
 - [x] Add active dependency health checks for PostgreSQL, Redis, Temporal, Event Hubs, GenAI Hub, Kubernetes MCP, GitHub MCP, and DockerHub.
 - [ ] Add Slack dependency health check.
 - [x] Add readiness behavior that degrades when required dependencies are unavailable.
-- [ ] Add request body limits, rate limiting, production CORS validation, and security headers.
+- [x] Add request body limits and security headers.
+- [ ] Add rate limiting and production CORS validation.
 - [ ] Add CI/CD for lint, tests, migrations, Docker build, image scanning, SBOM, Helm checks, release, deploy, and rollback.
 - [ ] Deploy API, alert consumer, and Temporal worker to Azure AKS with production auth and Kubernetes secrets.
 - [ ] Run end-to-end incident simulations for latency, crash loop, bad config, and failed deployment scenarios.
@@ -1371,17 +1376,53 @@ Verification:
 - Focused auth tests pass with 24 tests.
 - `./scripts/verify.sh` passes with 91 tests.
 
-## Immediate Next Sprint
+## Completed Sprint: Entra Discovery and JWKS Rotation
 
 Sprint goal: add Microsoft Entra issuer discovery and JWKS caching/rotation behavior without weakening the current strict claim checks.
 
 Tasks:
 
-1. [ ] Add Entra OpenID configuration discovery from `/.well-known/openid-configuration`.
-2. [ ] Cache discovered issuer and JWKS URI with bounded TTL.
-3. [ ] Refresh JWKS metadata on key lookup failure to handle key rotation.
-4. [ ] Add tests for discovery success, discovery failure, cached reuse, and key-rotation refresh.
-5. [ ] Document production behavior and operational failure modes.
+1. [x] Add Entra OpenID configuration discovery from `/.well-known/openid-configuration`.
+2. [x] Cache discovered issuer and JWKS URI with bounded TTL.
+3. [x] Refresh JWKS metadata on key lookup failure to handle key rotation.
+4. [x] Add tests for discovery success, discovery failure, cached reuse, and key-rotation refresh.
+5. [x] Document production behavior and operational failure modes.
+
+Verification:
+
+- Focused `ruff check` for touched security, JWT fixture tests, and deployment docs passes.
+- `pytest tests/unit/test_entra_jwt_validator.py -q` passes with 11 tests.
+- `./scripts/verify.sh` passes with 94 tests.
+
+## Completed Sprint: API HTTP Hardening
+
+Sprint goal: add API security headers and request body limits as a first production HTTP hardening pass.
+
+Tasks:
+
+1. [x] Add configurable maximum request body size.
+2. [x] Add ASGI middleware that rejects oversized requests with `413`.
+3. [x] Add response security headers for API responses.
+4. [x] Wire the middleware into FastAPI application creation.
+5. [x] Add ASGI-level tests for normal requests, oversized requests, middleware wiring, and security headers.
+
+Verification:
+
+- Focused `ruff check` for touched API, middleware, settings, and smoke-test files passes.
+- `pytest tests/integration/test_backend_smoke.py -q` passes with 18 tests.
+- `./scripts/verify.sh` passes with 98 tests.
+
+## Immediate Next Sprint
+
+Sprint goal: fail safely in production when security-critical HTTP or auth configuration is missing or too permissive.
+
+Tasks:
+
+1. [ ] Fail fast in production when Entra auth is enabled but tenant/client settings are missing.
+2. [ ] Fail fast in production when Entra auth is disabled.
+3. [ ] Validate production CORS origins are explicit HTTPS origins, not wildcards.
+4. [ ] Add settings tests for production auth and CORS validation.
+5. [ ] Document the production startup guardrails.
 
 ## Verified Remaining Critical Path
 
