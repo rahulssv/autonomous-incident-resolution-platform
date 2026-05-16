@@ -12,6 +12,7 @@ from airp.schemas.incidents import (
     IncidentRead,
     IncidentSignal,
     IncidentTimeline,
+    ModelCallRead,
     RCAHypothesisRead,
     RemediationPlanCreate,
     RemediationPlanRead,
@@ -197,6 +198,22 @@ async def list_rca_hypotheses(
         offset=offset,
     )
     return [RCAHypothesisRead.model_validate(hypothesis) for hypothesis in hypotheses]
+
+
+@router.get("/{incident_id}/model-calls", response_model=list[ModelCallRead])
+async def list_model_calls(
+    incident_id: str,
+    session: DbSession,
+    _: CurrentPrincipal,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[ModelCallRead]:
+    model_calls = await IncidentService(session).list_model_calls(
+        incident_id,
+        limit=limit,
+        offset=offset,
+    )
+    return [ModelCallRead.model_validate(model_call) for model_call in model_calls]
 
 
 @router.post(

@@ -73,7 +73,7 @@ class FakeRCAClient:
                     rank=1,
                     hypothesis="A recent checkout timeout change is the likely cause.",
                     confidence=0.82,
-                    supporting_evidence_refs=["github", "kubernetes"],
+                    supporting_evidence_refs=["correlation", "service_catalog"],
                     contradictions=[],
                     next_actions=["review_checkout_timeout_change"],
                 )

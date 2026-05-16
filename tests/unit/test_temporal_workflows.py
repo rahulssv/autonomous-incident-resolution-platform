@@ -2,7 +2,11 @@ import pytest
 
 from airp.core.config import Settings
 from airp.workflows.client import TemporalIncidentWorkflowStarter
-from airp.workflows.incident import IncidentWorkflowInput
+from airp.workflows.incident import (
+    AGENT_GRAPH_ACTIVITY_TIMEOUT,
+    AGENT_GRAPH_RETRY_POLICY,
+    IncidentWorkflowInput,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -41,3 +45,8 @@ async def test_temporal_starter_uses_stable_incident_workflow_id() -> None:
     assert kwargs["task_queue"] == "test-task-queue"
     assert result.workflow_id == "airp-incident-inc-123"
     assert result.workflow_run_id == "run-123"
+
+
+async def test_agent_graph_activity_has_dedicated_retry_settings() -> None:
+    assert AGENT_GRAPH_ACTIVITY_TIMEOUT.total_seconds() == 120
+    assert AGENT_GRAPH_RETRY_POLICY.maximum_attempts == 3

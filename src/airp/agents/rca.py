@@ -167,6 +167,8 @@ class RCAAgent:
                 "schema": "RCAHypothesisSet",
                 "hypothesis_count": len(result.hypotheses),
             }
+            result, grounding_result = self._ground_hypothesis_result(plan, result)
+            validation_result.update(grounding_result)
         except Exception as exc:  # noqa: BLE001 - RCA should escalate, not crash the graph
             result = RCAHypothesisSet(
                 summary="RCA hypothesis generation failed; manual triage is required.",
@@ -198,6 +200,83 @@ class RCAAgent:
             "validation_result": validation_result,
         }
         return result, model_call
+
+    def _ground_hypothesis_result(
+        self, plan: RCAPlan, result: RCAHypothesisSet
+    ) -> tuple[RCAHypothesisSet, dict[str, Any]]:
+        allowed_refs = set(plan.evidence_bundle.evidence_sources)
+        unsupported_refs: list[str] = []
+        missing_ref_ranks: list[int] = []
+        low_confidence_ranks: list[int] = []
+
+        for hypothesis in result.hypotheses:
+            refs = list(hypothesis.supporting_evidence_refs)
+            if not refs:
+                missing_ref_ranks.append(hypothesis.rank)
+            unsupported_refs.extend(ref for ref in refs if ref not in allowed_refs)
+            if hypothesis.confidence < self.settings.rca_min_hypothesis_confidence:
+                low_confidence_ranks.append(hypothesis.rank)
+
+        if missing_ref_ranks or unsupported_refs:
+            reason = "RCA model output contained unsupported or uncited claims."
+            contradictions = []
+            if missing_ref_ranks:
+                contradictions.append(
+                    f"Missing evidence refs on ranks: {', '.join(map(str, missing_ref_ranks))}"
+                )
+            if unsupported_refs:
+                contradictions.append(
+                    "Unsupported evidence refs: "
+                    f"{', '.join(sorted(set(unsupported_refs)))}"
+                )
+            return (
+                RCAHypothesisSet(
+                    summary=f"{reason} Manual triage is required.",
+                    hypotheses=[
+                        RCAHypothesisOutput(
+                            rank=1,
+                            hypothesis="Unsupported RCA output was rejected.",
+                            confidence=0.1,
+                            supporting_evidence_refs=sorted(allowed_refs),
+                            contradictions=contradictions,
+                            next_actions=["manual_sre_triage"],
+                        )
+                    ],
+                    escalation_required=True,
+                    escalation_reason=reason,
+                ),
+                {
+                    "grounded": False,
+                    "rejected_reason": reason,
+                    "unsupported_refs": sorted(set(unsupported_refs)),
+                    "missing_ref_ranks": missing_ref_ranks,
+                },
+            )
+
+        if low_confidence_ranks:
+            result.escalation_required = True
+            result.escalation_reason = (
+                "All low-confidence RCA outputs require manual SRE triage."
+            )
+            for hypothesis in result.hypotheses:
+                if "manual_sre_triage" not in hypothesis.next_actions:
+                    hypothesis.next_actions.append("manual_sre_triage")
+            return (
+                result,
+                {
+                    "grounded": True,
+                    "low_confidence_ranks": low_confidence_ranks,
+                    "min_confidence": self.settings.rca_min_hypothesis_confidence,
+                },
+            )
+
+        return (
+            result,
+            {
+                "grounded": True,
+                "min_confidence": self.settings.rca_min_hypothesis_confidence,
+            },
+        )
 
     def _deterministic_hypotheses(self, plan: RCAPlan) -> RCAHypothesisSet:
         bundle = plan.evidence_bundle

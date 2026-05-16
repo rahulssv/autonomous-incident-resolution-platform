@@ -279,6 +279,19 @@ class IncidentService:
         await self.session.refresh(model_call)
         return model_call
 
+    async def list_model_calls(
+        self, incident_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[ModelCall]:
+        await self.get_incident(incident_id)
+        stmt = (
+            select(ModelCall)
+            .where(ModelCall.incident_id == incident_id)
+            .order_by(ModelCall.created_at)
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self.session.scalars(stmt)).all())
+
     async def create_remediation_plan(
         self,
         incident_id: str,

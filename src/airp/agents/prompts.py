@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from airp.agents.safety import sanitize_untrusted_payload
+
 RCA_HYPOTHESIS_PROMPT_VERSION = "rca-hypothesis-v1"
 
 
@@ -29,8 +31,8 @@ def rca_hypothesis_messages(
             "content": json.dumps(
                 {
                     "prompt_version": RCA_HYPOTHESIS_PROMPT_VERSION,
-                    "incident": incident,
-                    "evidence_bundle": evidence_bundle,
+                    "incident": sanitize_untrusted_payload(incident),
+                    "evidence_bundle": sanitize_untrusted_payload(evidence_bundle),
                 },
                 separators=(",", ":"),
                 default=str,

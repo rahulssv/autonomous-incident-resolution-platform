@@ -1,0 +1,62 @@
+[
+  {
+    "name": "high_latency",
+    "title": "Checkout latency spike",
+    "description": "p95 latency is above SLO",
+    "kubernetes_logs": ["timeout talking to payments after checkout retry change"],
+    "kubernetes_events": ["Readiness probe failed for checkout-api"],
+    "restart_count": 0,
+    "github_commit_message": "Tune checkout payment timeout",
+    "github_file": "src/checkout/payments.py",
+    "docker_source_commit": "latency123",
+    "expected_refs": ["kubernetes", "github", "dockerhub"]
+  },
+  {
+    "name": "crash_loop",
+    "title": "Checkout crash loop",
+    "description": "pod restarts repeatedly",
+    "kubernetes_logs": ["Traceback during checkout startup"],
+    "kubernetes_events": ["Back-off restarting failed container"],
+    "restart_count": 7,
+    "github_commit_message": "Update checkout startup config",
+    "github_file": "src/checkout/settings.py",
+    "docker_source_commit": "crash123",
+    "expected_refs": ["kubernetes", "github", "dockerhub"]
+  },
+  {
+    "name": "bad_deployment",
+    "title": "Checkout deployment degraded",
+    "description": "rollout has unavailable replicas",
+    "kubernetes_logs": ["new pod cannot become ready"],
+    "kubernetes_events": ["Deployment does not have minimum availability"],
+    "restart_count": 2,
+    "github_commit_message": "Deploy checkout image v2",
+    "github_file": "helm/values.yaml",
+    "docker_source_commit": "deploy123",
+    "expected_refs": ["kubernetes", "github", "dockerhub"]
+  },
+  {
+    "name": "config_error",
+    "title": "Checkout config error",
+    "description": "service rejects requests after config change",
+    "kubernetes_logs": ["missing CHECKOUT_PAYMENT_URL environment variable"],
+    "kubernetes_events": ["ConfigMap checkout-api updated"],
+    "restart_count": 1,
+    "github_commit_message": "Rename checkout payment config key",
+    "github_file": "config/application.yaml",
+    "docker_source_commit": "config123",
+    "expected_refs": ["kubernetes", "github", "dockerhub"]
+  },
+  {
+    "name": "failed_deployment",
+    "title": "Checkout failed deployment",
+    "description": "new image fails readiness",
+    "kubernetes_logs": ["readiness probe returned 503"],
+    "kubernetes_events": ["ReplicaSet checkout-api-new failed to progress"],
+    "restart_count": 3,
+    "github_commit_message": "Release checkout image v3",
+    "github_file": ".github/workflows/release.yaml",
+    "docker_source_commit": "release123",
+    "expected_refs": ["kubernetes", "github", "dockerhub"]
+  }
+]

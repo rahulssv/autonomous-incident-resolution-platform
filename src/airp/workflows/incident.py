@@ -15,6 +15,12 @@ ACTIVITY_RETRY_POLICY = RetryPolicy(
     maximum_interval=timedelta(seconds=10),
     maximum_attempts=5,
 )
+AGENT_GRAPH_ACTIVITY_TIMEOUT = timedelta(minutes=2)
+AGENT_GRAPH_RETRY_POLICY = RetryPolicy(
+    initial_interval=timedelta(seconds=2),
+    maximum_interval=timedelta(seconds=20),
+    maximum_attempts=3,
+)
 
 
 @dataclass
@@ -68,7 +74,27 @@ class IncidentWorkflow:
         self.state.status = IncidentStatus.VALIDATED.value
         self.state.current_step = "validated"
         await self._run_agent_graph()
-        self.state.current_step = "agent_graph_completed"
+        self.state.current_step = "rca_hypotheses_generated"
+        await self._record_workflow_event(
+            "workflow.step.completed",
+            {"step": "rca_hypotheses_generated"},
+        )
+        self.state.current_step = "issue_creation_skipped"
+        await self._record_workflow_event(
+            "github.issue.skipped",
+            {
+                "reason": "GitHub issue creation policy is disabled",
+                "policy_default": "disabled",
+            },
+        )
+        self.state.current_step = "slack_notification_skipped"
+        await self._record_workflow_event(
+            "slack.notification.skipped",
+            {
+                "reason": "Slack notification policy is disabled",
+                "policy_default": "disabled",
+            },
+        )
 
         while not self.state.completed:
             await workflow.wait_condition(lambda: bool(self._signals))
@@ -187,17 +213,21 @@ class IncidentWorkflow:
     async def _record_signal(self, signal: WorkflowSignal) -> None:
         if self.state is None:
             return
+        await self._record_workflow_event(
+            "workflow.signaled",
+            {
+                "signal": signal.name,
+                "reason": signal.reason,
+                "payload": signal.payload,
+            },
+        )
+
+    async def _record_workflow_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        if self.state is None:
+            return
         await workflow.execute_activity(
             "incident_record_workflow_event",
-            args=[
-                self.state.incident_id,
-                "workflow.signaled",
-                {
-                    "signal": signal.name,
-                    "reason": signal.reason,
-                    "payload": signal.payload,
-                },
-            ],
+            args=[self.state.incident_id, event_type, payload],
             start_to_close_timeout=ACTIVITY_TIMEOUT,
             retry_policy=ACTIVITY_RETRY_POLICY,
         )
@@ -208,6 +238,6 @@ class IncidentWorkflow:
         await workflow.execute_activity(
             "agent_graph_run",
             args=[self.state.incident_id, workflow.info().workflow_id],
-            start_to_close_timeout=timedelta(minutes=2),
-            retry_policy=ACTIVITY_RETRY_POLICY,
+            start_to_close_timeout=AGENT_GRAPH_ACTIVITY_TIMEOUT,
+            retry_policy=AGENT_GRAPH_RETRY_POLICY,
         )

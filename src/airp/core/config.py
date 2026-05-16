@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     llm_documentation_model: str = "gpt-4.1"
     llm_embedding_model: str = "embeddings"
     agent_read_only_evidence_enabled: bool = False
+    rca_min_hypothesis_confidence: float = Field(default=0.4, ge=0.0, le=1.0)
+    github_issue_creation_enabled: bool = False
+    slack_notifications_enabled: bool = False
+    remediation_pr_creation_enabled: bool = False
+    documentation_publishing_enabled: bool = False
 
     client_github_org: str = "AIRP-client"
     azure_subscription_id: str = "568d5cd8-cd2c-4170-ae3e-0b93b2cc39aa"

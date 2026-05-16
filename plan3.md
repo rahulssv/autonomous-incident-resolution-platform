@@ -29,15 +29,17 @@ Already implemented:
 - Temporal `agent_graph_run` persistence for RCA Kubernetes/GitHub/DockerHub evidence items and recorded tool calls.
 - RCA hypothesis Pydantic schemas, versioned RCA prompt, structured GenAI Hub hypothesis path, and deterministic low-evidence escalation fallback.
 - Temporal `agent_graph_run` persistence for RCA hypotheses and GenAI model-call audit records.
-- Read APIs for incident evidence, tool calls, and RCA hypotheses.
+- RCA safety hardening for unsupported claims, low-confidence escalation, prompt-injection text in evidence, and scenario fixtures.
+- Read APIs for incident evidence, tool calls, model calls, and RCA hypotheses.
+- Disabled-by-default external action policy flags and shared artifact idempotency helper for future GitHub, Slack, PR, and documentation writes.
 - Dockerfile, Docker Compose, Helm chart, AKS helper script, migration script, deployment docs, and verification script.
 - Unit and smoke tests for the implemented foundation.
 
 Still not production complete:
 
 - Full Temporal workflow execution is not complete beyond the MVP workflow skeleton.
-- LangGraph supervisor MVP is implemented through Monitoring, Correlation, RCA planning, and Embedding, but full evidence-backed multi-agent orchestration remains pending.
-- Real Kubernetes MCP, GitHub MCP, Slack, and GenAI agent behavior is not end-to-end.
+- LangGraph supervisor MVP is implemented through Monitoring, Correlation, RCA evidence planning, RCA hypotheses, and Embedding, but Remediation and Documentation agents remain pending.
+- Live Kubernetes MCP, live GitHub MCP, Slack, approval UX, and governed repository-write behavior are not end-to-end.
 - PostgreSQL + pgvector has not been fully verified with migrations and integration tests.
 - Entra ID authorization roles are not production-grade yet.
 - Observability, security hardening, CI/CD, and AKS production deployment need to be finished.
@@ -54,6 +56,7 @@ Verified from the current repository on 2026-05-16:
 - Documentation and Remediation agents are not implemented as LangGraph nodes yet.
 - RCA Agent can use a configured read-only evidence collector for Kubernetes MCP, GitHub MCP, and DockerHub evidence.
 - RCA Agent generates typed RCA hypotheses with confidence, evidence refs, contradictions, next actions, and escalation decision.
+- RCA Agent rejects unsupported or uncited model claims, escalates low-confidence output, and sanitizes untrusted evidence before prompt construction.
 - RCA Agent records model-call audit metadata for structured GenAI Hub hypothesis generation.
 - Kubernetes, GitHub, and DockerHub evidence clients support fixture-backed reads and typed DTOs for deterministic tests.
 - RCA evidence persistence stores evidence item payload hashes and tool-call parameter/result hashes.
@@ -72,11 +75,11 @@ The remaining product work is:
 - Kubernetes MCP implementation for pod logs, events, deployments, rollout state, replica sets, redaction, and evidence storage.
 - GitHub MCP implementation for repository history, issues, branches, file writes through PR branches, draft PRs, comments, and artifact persistence.
 - Slack notification, signed approval callbacks, threaded updates, replay protection, and approval expiry.
-- LangGraph expansion from the current Monitoring, Correlation, RCA-planning, and Embedding MVP into real RCA evidence collection, Remediation, Documentation, graph checkpoints, graph resume, and graph execution audit.
-- GenAI Hub production agent controls: prompt templates, model-call persistence, fallback policy, cost tracking, groundedness rules, prompt-injection hardening, and eval fixtures.
+- LangGraph expansion from the current Monitoring, Correlation, RCA evidence/hypothesis, and Embedding MVP into live RCA evidence collection, Remediation, Documentation, graph checkpoints, graph resume, and graph execution audit.
+- GenAI Hub production agent controls beyond the RCA prompt: shared prompt loading, model fallback policy, token/cost tracking, groundedness rules, prompt-injection hardening, and eval fixtures.
 - Incident memory: pgvector-backed embeddings, semantic search, background embedding jobs, ranking tests, and secret-safe embedding policy.
 - End-to-end RCA, remediation, documentation, and knowledge-loop behavior.
-- API completion for evidence, hypotheses, artifacts, Slack messages, model calls, tool calls, audit export, policy management, refresh, and republish flows.
+- API completion for GitHub artifacts, Slack messages, audit export, policy management, refresh, and republish flows.
 - Observability, security hardening, CI/CD, AKS production deployment, end-to-end simulations, resilience testing, and handoff documentation.
 
 ## Product Guardrails
@@ -96,8 +99,8 @@ The remaining product work is:
 1. Stabilize persistence and API hardening.
 2. Finish Temporal workflow hardening beyond the current MVP.
 3. Finish live Event Hubs and PostgreSQL validation.
-4. Implement read-only discovery and evidence collection through Kubernetes MCP, GitHub MCP, and DockerHub.
-5. Expand LangGraph-based structured GenAI agents beyond Monitoring, Correlation, RCA planning, and Embedding.
+4. Finish live discovery and evidence collection through Kubernetes MCP, GitHub MCP, and DockerHub.
+5. Expand LangGraph-based structured GenAI agents beyond Monitoring, Correlation, RCA, and Embedding.
 6. Add Slack notifications and approval callbacks.
 7. Add governed GitHub issue and draft PR creation.
 8. Add incident memory with pgvector.
@@ -143,9 +146,13 @@ Goal: enforce enterprise authentication and role-based authorization.
 
 Tasks:
 
+- [x] Add Microsoft Entra ID JWT validator boundary.
+- [x] Validate configured Entra `aud`, `iss`, `exp`, and `iat` claims.
+- [x] Extract principal subject, tenant, username, roles, and scopes.
+- [x] Add reusable role-check dependency helper.
 - [ ] Add issuer discovery from Entra `/.well-known/openid-configuration`.
 - [ ] Cache JWKS and refresh on key rotation.
-- [ ] Validate `aud`, `iss`, `exp`, `iat`, `nbf`, `tid`, and app roles.
+- [ ] Validate `nbf`, required `tid`, and required app roles.
 - [ ] Define app roles: `AIRP.Admin`, `AIRP.SRE`, `AIRP.Viewer`, `AIRP.Approver`.
 - [ ] Add route-level role dependencies.
 - [ ] Require Admin for catalog/admin operations.
@@ -199,18 +206,24 @@ Tasks:
 - [x] Implement `IncidentWorkflow`.
 - [x] Start a workflow when an alert creates a validated incident.
 - [x] Persist workflow ID and run ID on incidents.
-- [ ] Add workflow states for received, validated, correlation, RCA, issue creation, Slack notification, remediation planning, approval wait, PR creation, documentation, closure, and escalation.
+- [x] Add basic workflow states for received, validated, agent graph completed, paused, approved, rejected, escalated, and closed.
+- [x] Add workflow states/events for RCA hypotheses generated, issue creation skipped, and Slack notification skipped.
+- [ ] Add workflow states for correlation, issue creation created, Slack notification sent, remediation planning, approval wait, PR creation, documentation, closure, and escalation.
 - [x] Implement workflow activities for database state updates.
 - [x] Implement workflow activity hook for LangGraph Monitoring, Correlation, RCA planning, and Embedding.
 - [x] Persist RCA Kubernetes/GitHub/DockerHub evidence sections and recorded tool calls from `agent_graph_run`.
-- [ ] Implement workflow activities for Kubernetes evidence, GitHub evidence, DockerHub image evidence, GenAI RCA hypotheses, GitHub issue creation, Slack notifications, remediation planning, approval handling, PR creation, documentation, and closure.
+- [x] Persist RCA hypotheses and RCA model-call audit records from `agent_graph_run`.
+- [ ] Implement dedicated live workflow activities for Kubernetes evidence, GitHub evidence, DockerHub image evidence, GitHub issue creation, Slack notifications, remediation planning, approval handling, PR creation, documentation, and closure.
 - [x] Add workflow signals: pause, resume, approve, reject, escalate, close.
 - [ ] Add workflow signal for retry failed activity.
 - [x] Add workflow query for current state and current step.
 - [ ] Add workflow queries for evidence summary, approval request, and timeline.
 - [ ] Add idempotency keys for every activity that writes external artifacts.
-- [ ] Add retry policies with backoff and non-retryable error types.
-- [ ] Add activity timeouts and heartbeat handling for long evidence collection.
+- [x] Add basic activity retry policy with backoff for current Temporal activities.
+- [x] Add start-to-close activity timeouts for current Temporal activities.
+- [x] Add dedicated retry settings for the current agent graph activity that includes RCA hypothesis generation and evidence persistence.
+- [ ] Add activity-specific retry policies with non-retryable error types for each external integration.
+- [ ] Add heartbeat handling for long evidence collection.
 - [ ] Add workflow replay tests.
 - [ ] Add worker restart tests.
 
@@ -265,13 +278,13 @@ Tasks:
 - [x] Add fixture-based Kubernetes evidence client tests.
 - [ ] Choose Kubernetes MCP transport and configure settings.
 - [ ] Configure read-only AKS identity and namespace allowlist.
-- [ ] Implement `list_pods`.
-- [ ] Implement `get_pod`.
-- [ ] Implement `get_pod_logs`.
-- [ ] Implement `list_events`.
-- [ ] Implement `get_deployment`.
-- [ ] Implement `get_rollout_status`.
-- [ ] Implement `list_replicasets`.
+- [ ] Implement live `list_pods` through selected MCP transport.
+- [ ] Implement live `get_pod` through selected MCP transport.
+- [ ] Implement live `get_pod_logs` through selected MCP transport.
+- [ ] Implement live `list_events` through selected MCP transport.
+- [ ] Implement live `get_deployment` through selected MCP transport.
+- [ ] Implement live `get_rollout_status` through selected MCP transport.
+- [ ] Implement live `list_replicasets` through selected MCP transport.
 - [ ] Implement bounded log windows by line count and time range.
 - [ ] Add request timeouts.
 - [ ] Add retry policy for transient MCP failures.
@@ -300,14 +313,14 @@ Tasks:
 - [x] Add fixture-based GitHub MCP evidence tests.
 - [ ] Choose GitHub MCP transport and configure settings.
 - [ ] Configure least-privilege org-scoped credentials for AIRP-client.
-- [ ] Implement repository listing.
-- [ ] Implement repository metadata fetch.
-- [ ] Implement branch lookup.
-- [ ] Implement commit lookup by SHA.
-- [ ] Implement commit lookup by time window.
-- [ ] Implement changed-files lookup.
-- [ ] Implement merged PR lookup by repository and time window.
-- [ ] Implement issue lookup by idempotency marker.
+- [ ] Implement live repository listing.
+- [ ] Implement live repository metadata fetch.
+- [ ] Implement live branch lookup.
+- [ ] Implement live commit lookup by SHA.
+- [ ] Implement live commit lookup by time window.
+- [ ] Implement live changed-files lookup.
+- [ ] Implement live merged PR lookup by repository and time window.
+- [ ] Implement live issue lookup by idempotency marker.
 - [ ] Implement issue creation with idempotency.
 - [ ] Implement branch creation with safe naming.
 - [ ] Implement file read on target branch.
@@ -388,11 +401,12 @@ Tasks:
 - [x] Correlation Agent: produce compact context for RCA and remediation.
 - [x] Add RCA Agent graph node.
 - [x] Add RCA Agent prompt.
+- [x] Add versioned RCA prompt template.
 - [x] Add RCA Agent structured output.
 - [x] RCA Agent: call configured read-only evidence collector for Kubernetes, GitHub, and DockerHub evidence.
-- [ ] RCA Agent: call Kubernetes MCP for pods, logs, events, deployments, rollout state, restart count, image ID, and namespace context.
-- [ ] RCA Agent: call GitHub MCP for commits, merged PRs, changed files, releases, owners, and prior issues.
-- [ ] RCA Agent: call DockerHub client for image tag and digest correlation.
+- [ ] RCA Agent: call live Kubernetes MCP for pods, logs, events, deployments, rollout state, restart count, image ID, and namespace context.
+- [ ] RCA Agent: call live GitHub MCP for commits, merged PRs, changed files, releases, owners, and prior issues.
+- [ ] RCA Agent: call live DockerHub client for image tag and digest correlation.
 - [x] RCA Agent: build initial evidence-planning bundle from incident, monitoring, catalog, and workload context.
 - [x] RCA Agent: extend evidence bundle with Kubernetes, GitHub, and DockerHub evidence.
 - [x] RCA Agent: produce ranked hypotheses with confidence, evidence IDs, contradictions, and next actions.
@@ -423,17 +437,21 @@ Tasks:
 - [ ] Add model fallback policy by incident severity.
 - [ ] Add token and cost estimation.
 - [ ] Add rate-limit and timeout escalation behavior.
-- [ ] Require evidence citations for RCA and remediation outputs.
-- [ ] Reject unsupported claims or low-confidence outputs.
-- [ ] Add prompt-injection hardening for Kubernetes logs, GitHub content, Slack text, and user-provided fields.
+- [x] Require RCA hypothesis evidence refs and persist stored evidence ID links when evidence items are stored.
+- [ ] Require evidence citations for remediation outputs.
+- [x] Add deterministic low-evidence escalation fallback for RCA hypotheses.
+- [x] Reject unsupported RCA claims from model output.
+- [x] Add RCA prompt-injection hardening for Kubernetes logs and GitHub content.
+- [ ] Add prompt-injection hardening for Slack text and remaining user-provided fields.
 - [ ] Add structured output validation failures to incident timeline.
 - [x] Add LangGraph unit tests for supervisor routing.
 - [x] Add LangGraph node tests with mocked GenAI Hub and embedding dependencies.
 - [x] Add LangGraph node tests with fixture-backed service/workload correlation.
 - [x] Add LangGraph RCA node tests with mocked Kubernetes MCP, GitHub MCP, and DockerHub dependencies.
-- [ ] Add LangGraph node tests with mocked Kubernetes MCP, GitHub MCP, Slack, DockerHub, and pgvector dependencies.
+- [ ] Add LangGraph node tests with mocked Slack and pgvector dependencies.
 - [ ] Add graph replay/resume tests.
-- [ ] Add LLM eval fixtures for high latency, crash loop, bad deployment, config error, and missing evidence scenarios.
+- [x] Add RCA golden fixtures for high latency, crash loop, bad deployment, config error, and failed deployment scenarios.
+- [ ] Add LLM eval fixtures for missing evidence and model timeout scenarios.
 - [ ] Document GenAI Hub configuration without committing secrets.
 
 Acceptance criteria:
@@ -494,10 +512,11 @@ Tasks:
 - [ ] Create GitHub issue in affected repository.
 - [ ] Send Slack notification with issue link.
 - [ ] Update incident status to `RCA_ISSUE_CREATED` and `SLACK_NOTIFIED`.
-- [ ] Add golden tests for high latency.
-- [ ] Add golden tests for crash loop.
-- [ ] Add golden tests for bad deployment.
-- [ ] Add golden tests for config error.
+- [x] Add golden tests for high latency.
+- [x] Add golden tests for crash loop.
+- [x] Add golden tests for bad deployment.
+- [x] Add golden tests for config error.
+- [x] Add golden tests for failed deployment.
 
 Acceptance criteria:
 
@@ -568,7 +587,7 @@ Tasks:
 - [x] Add RCA hypothesis listing endpoint.
 - [ ] Add GitHub artifact listing endpoint.
 - [ ] Add Slack message listing endpoint.
-- [ ] Add model call listing endpoint with safe prompt/response redaction.
+- [x] Add model call listing endpoint with safe prompt/response hashes only.
 - [x] Add tool call listing endpoint.
 - [ ] Add audit export endpoint.
 - [ ] Add policy management endpoint for Admin users.
@@ -623,6 +642,8 @@ Tasks:
 - [ ] Add strict production CORS allowlist.
 - [ ] Add response security headers.
 - [ ] Add audit trail coverage checks.
+- [x] Add redaction before GenAI Hub chat and embedding requests.
+- [x] Add redaction before RCA Kubernetes/GitHub/DockerHub evidence storage.
 - [ ] Add secret-like content detection before LLM prompts, logs, issues, Slack messages, PRs, and embeddings.
 - [x] Add MCP parameter and result hashing for recorded RCA tool calls.
 - [ ] Add allowlist for GitHub repositories under AIRP-client.
@@ -789,9 +810,9 @@ Acceptance criteria:
 
 - [ ] Add typed domain events for every state transition.
 - [ ] Add event schema versioning and compatibility checks.
-- [ ] Add shared idempotency key helper library.
+- [x] Add shared idempotency key helper library.
 - [ ] Add centralized policy engine for approval and remediation guardrails.
-- [ ] Add feature flags for issue creation, Slack notification, PR creation, and documentation publishing.
+- [x] Add disabled-by-default feature flags for issue creation, Slack notification, PR creation, and documentation publishing.
 - [ ] Add tenant/environment separation if more client environments are added.
 - [ ] Add database backup and restore scripts.
 - [ ] Add cleanup jobs for stale Redis keys, old dead letters, and old workflow artifacts.
@@ -821,12 +842,16 @@ Highest-priority remaining engineering tasks:
 - [ ] Add live DockerHub digest/source correlation behavior.
 - [x] Persist Kubernetes, GitHub, and DockerHub evidence items from RCA runs.
 - [x] Add structured GenAI RCA hypothesis generation with evidence citations.
+- [x] Persist RCA hypotheses and RCA model-call audit records.
+- [x] Add API endpoints for evidence, RCA hypotheses, tool calls, and model calls.
+- [x] Add RCA golden fixtures and safety tests for unsupported claims, low-confidence output, and prompt-injection text.
+- [x] Add disabled-by-default external action policy flags and shared idempotency helper.
 - [ ] Add idempotent GitHub issue creation after RCA policy allows it.
 - [ ] Add Slack notification, signed approval callback, replay protection, and threaded updates.
 - [ ] Add Remediation Agent graph node, policy guardrails, approval wait, branch creation, and draft PR creation.
 - [ ] Add Documentation Agent graph node, final RCA report storage, publishing, and embedding.
 - [ ] Add vector-backed semantic search and ranking tests.
-- [ ] Add API endpoints for evidence, RCA hypotheses, GitHub artifacts, Slack messages, model calls, tool calls, audit export, policy management, discovery refresh, and report republish.
+- [ ] Add API endpoints for GitHub artifacts, Slack messages, audit export, policy management, discovery refresh, and report republish.
 - [ ] Add CI/CD workflows for lint, tests, migrations, Docker build, image scanning, SBOM, Helm checks, release, deployment, and rollback.
 - [ ] Deploy and validate AIRP API, alert consumer, and Temporal worker on Azure AKS with Kubernetes secrets and production auth.
 - [ ] Run end-to-end simulations for latency, crash loop, bad config, and failed deployment incidents.
@@ -880,22 +905,54 @@ Verification:
 
 - `./scripts/verify.sh` passes with 28 tests.
 
-## Immediate Next Sprint
+## Completed Sprint: RCA Safety and Write-Policy Scaffolding
 
 Sprint goal: harden RCA hypotheses with scenario fixtures and prepare governed external artifact creation without enabling writes by default.
 
 Tasks:
 
-1. Add golden RCA fixtures for high latency, crash loop, bad deployment, config error, and failed deployment scenarios.
-2. Add low-confidence and unsupported-claim rejection tests for RCA hypothesis output.
-3. Add prompt-injection hardening tests for Kubernetes logs and GitHub text.
-4. Add model-call listing endpoint with safe redaction and hashes only.
-5. Add idempotency helper for future GitHub issue, Slack thread, and PR artifact creation.
-6. Define GitHub issue creation policy and feature flag, default disabled.
-7. Define Slack notification policy and feature flag, default disabled.
-8. Add workflow states for RCA hypotheses generated, issue creation skipped, and Slack notification skipped.
-9. Add Temporal activity retry settings for RCA hypothesis generation and evidence persistence.
-10. Keep repository writes, Slack sends, and documentation publishing disabled until approval/policy layers are implemented.
+1. [x] Add golden RCA fixtures for high latency, crash loop, bad deployment, config error, and failed deployment scenarios.
+2. [x] Add low-confidence and unsupported-claim rejection tests for RCA hypothesis output.
+3. [x] Add prompt-injection hardening tests for Kubernetes logs and GitHub text.
+4. [x] Add model-call listing endpoint with safe redaction and hashes only.
+5. [x] Add idempotency helper for future GitHub issue, Slack thread, and PR artifact creation.
+6. [x] Define GitHub issue creation policy and feature flag, default disabled.
+7. [x] Define Slack notification policy and feature flag, default disabled.
+8. [x] Add workflow states for RCA hypotheses generated, issue creation skipped, and Slack notification skipped.
+9. [x] Add Temporal activity retry settings for RCA hypothesis generation and evidence persistence.
+10. [x] Keep repository writes, Slack sends, and documentation publishing disabled until approval/policy layers are implemented.
+
+Verification:
+
+- `./scripts/verify.sh` passes with 40 tests.
+
+## Immediate Next Sprint
+
+Sprint goal: implement live read-transport configuration and allowlists for Kubernetes MCP, GitHub MCP, and DockerHub without enabling writes.
+
+Tasks:
+
+1. [ ] Add Kubernetes MCP transport settings, namespace allowlist settings, and read timeout settings.
+2. [ ] Add GitHub MCP transport settings, AIRP-client repository allowlist settings, and read timeout settings.
+3. [ ] Add DockerHub live tag/digest lookup tests with HTTP mocking.
+4. [ ] Add namespace and repository allowlist enforcement in the RCA evidence collector.
+5. [ ] Add MCP transient retry helpers with bounded backoff for read-only calls.
+6. [ ] Add incident timeline events for live evidence collection unavailable, forbidden by allowlist, and timeout outcomes.
+7. [ ] Add API/readiness dependency checks for Kubernetes MCP, GitHub MCP, and DockerHub configuration.
+8. [ ] Add documentation for AKS namespace allowlisting and AIRP-client repository allowlisting.
+9. [ ] Keep GitHub issue creation, Slack sends, remediation PR creation, and documentation publishing disabled.
+10. [ ] Re-run verification and update this plan after live-read scaffolding is complete.
+
+## Verified Remaining Critical Path
+
+Verified from the repository on 2026-05-16:
+
+1. Live integrations: choose and implement real Kubernetes MCP and GitHub MCP transports, then validate DockerHub live tag/digest lookup against public AIRP-client images.
+2. Governance: add feature flags, idempotency helpers, approval policy, repository allowlists, namespace allowlists, and blocked-path policy before any GitHub or Slack writes.
+3. Agent completion: implement Remediation and Documentation as LangGraph nodes with typed Pydantic outputs, prompts, tests, and workflow states.
+4. Memory: add pgvector migration, persist embedding vectors, and switch incident search to vector-backed ranking when query text is present.
+5. APIs: add GitHub artifact, Slack message, audit export, policy, discovery refresh, workflow-state, and documentation republish endpoints.
+6. Operations: add metrics, health/readiness checks, request/correlation ID middleware, structured logging, CI/CD workflows, scans, SBOM, and AKS production validation.
 
 ## Production-Ready Definition
 
