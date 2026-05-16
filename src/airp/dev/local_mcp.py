@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
+import json
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -29,6 +32,10 @@ async def health() -> dict[str, str]:
         "status": "ok",
         "transport": "mcp-http-bridge",
     }
+    if SERVER_TYPE == "kubernetes":
+        payload["mode"] = _kubernetes_health_mode()
+        payload["context"] = _kubernetes_context() or "<current>"
+        payload["default_namespace"] = _kubernetes_default_namespace()
     if SERVER_TYPE == "github":
         payload["mode"] = "github_app" if _github_app_configured() else "fixture"
         payload["org"] = _github_default_org()
@@ -38,13 +45,24 @@ async def health() -> dict[str, str]:
 @app.post("/tools/call")
 async def call_tool(payload: ToolCallRequest) -> dict[str, Any]:
     if SERVER_TYPE == "kubernetes":
-        return _kubernetes_tool(payload.tool, payload.arguments)
+        return await _kubernetes_tool(payload.tool, payload.arguments)
     if SERVER_TYPE == "github":
         return await _github_tool(payload.tool, payload.arguments)
     raise HTTPException(status_code=500, detail=f"Unsupported local MCP server: {SERVER_TYPE}")
 
 
-def _kubernetes_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+async def _kubernetes_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    if _kubernetes_cluster_configured():
+        return await asyncio.to_thread(_kubernetes_cluster_tool, tool, arguments)
+    if _kubernetes_cluster_requested():
+        raise HTTPException(
+            status_code=503,
+            detail="Kubernetes MCP cluster mode is enabled but kubeconfig is not readable",
+        )
+    return _kubernetes_fixture_tool(tool, arguments)
+
+
+def _kubernetes_fixture_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
     namespace = str(arguments.get("namespace") or "shopfast")
     pod_name = str(arguments.get("pod_name") or "checkout-api-local-7d9c")
     deployment = str(arguments.get("deployment") or "checkout-api")
@@ -129,7 +147,369 @@ def _kubernetes_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
         case "kubernetes.list_replicasets":
             return {"result": {"replica_sets": replica_sets}}
         case _:
-            raise HTTPException(status_code=404, detail=f"Unsupported Kubernetes MCP tool: {tool}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unsupported Kubernetes MCP tool: {tool}",
+            )
+
+
+def _kubernetes_cluster_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    core_api, apps_api = _kubernetes_api_clients()
+    namespace = str(arguments.get("namespace") or _kubernetes_default_namespace())
+    limit = _limit(arguments, default=100, maximum=500)
+
+    try:
+        match tool:
+            case "kubernetes.list_pods":
+                _ensure_kubernetes_namespace_allowed(namespace)
+                pods = core_api.list_namespaced_pod(
+                    namespace=namespace,
+                    label_selector=_optional_string(arguments.get("label_selector")),
+                    field_selector=_optional_string(arguments.get("field_selector")),
+                    limit=limit,
+                ).items
+                return {"result": {"pods": [_kubernetes_pod_payload(pod) for pod in pods]}}
+            case "kubernetes.get_pod":
+                _ensure_kubernetes_namespace_allowed(namespace)
+                pod_name = _required_argument(arguments, "pod_name")
+                pod = core_api.read_namespaced_pod(name=pod_name, namespace=namespace)
+                return {"result": {"pod": _kubernetes_pod_payload(pod)}}
+            case "kubernetes.get_pod_logs":
+                _ensure_kubernetes_namespace_allowed(namespace)
+                pod_name = _required_argument(arguments, "pod_name")
+                limit_lines = _limit(arguments, default=200, maximum=2000)
+                text = core_api.read_namespaced_pod_log(
+                    name=pod_name,
+                    namespace=namespace,
+                    container=_optional_string(arguments.get("container")),
+                    tail_lines=limit_lines,
+                    since_seconds=_optional_int(arguments.get("since_seconds")),
+                )
+                lines = str(text or "").splitlines()
+                return {
+                    "result": {
+                        "namespace": namespace,
+                        "pod_name": pod_name,
+                        "container": _optional_string(arguments.get("container")),
+                        "lines": lines[-limit_lines:],
+                        "truncated": len(lines) > limit_lines,
+                        "raw": {"source_link": f"kubernetes://{namespace}/pods/{pod_name}/logs"},
+                    }
+                }
+            case "kubernetes.list_events":
+                _ensure_kubernetes_namespace_allowed(namespace)
+                events = core_api.list_namespaced_event(namespace=namespace, limit=limit).items
+                events = sorted(events, key=_kubernetes_event_sort_key, reverse=True)
+                return {
+                    "result": {
+                        "events": [_kubernetes_event_payload(event) for event in events[:limit]]
+                    }
+                }
+            case "kubernetes.get_deployment":
+                _ensure_kubernetes_namespace_allowed(namespace)
+                deployment_name = _required_argument(arguments, "deployment")
+                deployment = apps_api.read_namespaced_deployment(
+                    name=deployment_name,
+                    namespace=namespace,
+                )
+                return {"result": {"deployment": _kubernetes_deployment_payload(deployment)}}
+            case "kubernetes.get_rollout_status":
+                _ensure_kubernetes_namespace_allowed(namespace)
+                deployment_name = _required_argument(arguments, "deployment")
+                deployment = apps_api.read_namespaced_deployment(
+                    name=deployment_name,
+                    namespace=namespace,
+                )
+                return {
+                    "result": {
+                        "rollout_status": _kubernetes_rollout_payload(deployment)
+                    }
+                }
+            case "kubernetes.list_replicasets":
+                _ensure_kubernetes_namespace_allowed(namespace)
+                deployment_name = _optional_string(arguments.get("deployment"))
+                label_selector = None
+                if deployment_name:
+                    deployment = apps_api.read_namespaced_deployment(
+                        name=deployment_name,
+                        namespace=namespace,
+                    )
+                    label_selector = _kubernetes_selector(deployment)
+                replica_sets = apps_api.list_namespaced_replica_set(
+                    namespace=namespace,
+                    label_selector=label_selector,
+                    limit=limit,
+                ).items
+                if deployment_name:
+                    replica_sets = [
+                        item
+                        for item in replica_sets
+                        if _kubernetes_replica_set_deployment(item) == deployment_name
+                    ]
+                return {
+                    "result": {
+                        "replica_sets": [
+                            _kubernetes_replica_set_payload(item) for item in replica_sets[:limit]
+                        ]
+                    }
+                }
+            case _:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Unsupported Kubernetes MCP tool: {tool}",
+                )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _kubernetes_http_exception(exc) from exc
+
+
+def _kubernetes_api_clients() -> tuple[Any, Any]:
+    try:
+        from kubernetes import client, config
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The kubernetes Python package is not installed in this image",
+        ) from exc
+
+    kubeconfig = _kubernetes_kubeconfig_path()
+    if kubeconfig is None or not kubeconfig.is_file():
+        raise HTTPException(status_code=503, detail="Kubernetes kubeconfig is not readable")
+
+    try:
+        config.load_kube_config(
+            config_file=str(kubeconfig),
+            context=_kubernetes_context(),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Kubernetes kubeconfig could not be loaded: {type(exc).__name__}",
+        ) from exc
+    return client.CoreV1Api(), client.AppsV1Api()
+
+
+def _kubernetes_health_mode() -> str:
+    if _kubernetes_cluster_configured():
+        return "cluster"
+    if _kubernetes_cluster_requested():
+        return "cluster_unavailable"
+    return "fixture"
+
+
+def _kubernetes_cluster_requested() -> bool:
+    return os.getenv("AIRP_KUBERNETES_MCP_MODE", "fixture").lower() in {"cluster", "live"}
+
+
+def _kubernetes_cluster_configured() -> bool:
+    if not _kubernetes_cluster_requested():
+        return False
+    kubeconfig = _kubernetes_kubeconfig_path()
+    return kubeconfig is not None and kubeconfig.is_file()
+
+
+def _kubernetes_kubeconfig_path() -> Path | None:
+    raw_path = os.getenv("AIRP_KUBERNETES_KUBECONFIG") or os.getenv("KUBECONFIG")
+    if not raw_path:
+        return None
+    return Path(raw_path).expanduser()
+
+
+def _kubernetes_context() -> str | None:
+    return _optional_string(os.getenv("AIRP_KUBERNETES_CONTEXT"))
+
+
+def _kubernetes_default_namespace() -> str:
+    return os.getenv("AIRP_KUBERNETES_DEFAULT_NAMESPACE") or "default"
+
+
+def _kubernetes_namespace_allowlist() -> list[str]:
+    raw_value = os.getenv("AIRP_KUBERNETES_MCP_NAMESPACE_ALLOWLIST", "")
+    if not raw_value:
+        return []
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        parsed = [item.strip() for item in raw_value.split(",")]
+    if isinstance(parsed, str):
+        parsed = [parsed]
+    if not isinstance(parsed, list):
+        return []
+    return [str(item).strip() for item in parsed if str(item).strip()]
+
+
+def _ensure_kubernetes_namespace_allowed(namespace: str) -> None:
+    allowed_namespaces = _kubernetes_namespace_allowlist()
+    if allowed_namespaces and namespace not in allowed_namespaces:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Namespace {namespace!r} is not in AIRP_KUBERNETES_MCP_NAMESPACE_ALLOWLIST",
+        )
+
+
+def _kubernetes_pod_payload(pod: Any) -> dict[str, Any]:
+    metadata = pod.metadata
+    spec = pod.spec
+    status = pod.status
+    containers = list(getattr(spec, "containers", None) or [])
+    container_statuses = list(getattr(status, "container_statuses", None) or [])
+    restart_count = sum(int(item.restart_count or 0) for item in container_statuses)
+    ready = all(bool(item.ready) for item in container_statuses) if container_statuses else None
+    return {
+        "namespace": metadata.namespace,
+        "name": metadata.name,
+        "phase": status.phase,
+        "ready": ready,
+        "restart_count": restart_count if container_statuses else None,
+        "node_name": spec.node_name,
+        "pod_ip": status.pod_ip,
+        "containers": [container.name for container in containers],
+        "images": [container.image for container in containers if container.image],
+        "labels": dict(metadata.labels or {}),
+        "raw": {
+            "source_link": f"kubernetes://{metadata.namespace}/pods/{metadata.name}",
+            "uid": metadata.uid,
+        },
+    }
+
+
+def _kubernetes_event_payload(event: Any) -> dict[str, Any]:
+    metadata = event.metadata
+    involved_object = event.involved_object
+    timestamp = (
+        getattr(event, "event_time", None)
+        or getattr(event, "last_timestamp", None)
+        or getattr(event, "first_timestamp", None)
+        or getattr(metadata, "creation_timestamp", None)
+    )
+    involved_name = getattr(involved_object, "name", None)
+    return {
+        "namespace": metadata.namespace,
+        "reason": event.reason or "",
+        "message": event.message or "",
+        "type": event.type,
+        "involved_object": involved_name,
+        "timestamp": _isoformat(timestamp),
+        "raw": {
+            "source_link": f"kubernetes://{metadata.namespace}/events/{metadata.name}",
+            "involved_kind": getattr(involved_object, "kind", None),
+        },
+    }
+
+
+def _kubernetes_deployment_payload(deployment: Any) -> dict[str, Any]:
+    metadata = deployment.metadata
+    spec = deployment.spec
+    status = deployment.status
+    pod_spec = deployment.spec.template.spec
+    containers = list(getattr(pod_spec, "containers", None) or [])
+    return {
+        "namespace": metadata.namespace,
+        "name": metadata.name,
+        "desired_replicas": spec.replicas,
+        "ready_replicas": status.ready_replicas,
+        "updated_replicas": status.updated_replicas,
+        "available_replicas": status.available_replicas,
+        "images": [container.image for container in containers if container.image],
+        "labels": dict(metadata.labels or {}),
+        "raw": {
+            "source_link": f"kubernetes://{metadata.namespace}/deployments/{metadata.name}",
+            "generation": metadata.generation,
+            "observed_generation": status.observed_generation,
+        },
+    }
+
+
+def _kubernetes_rollout_payload(deployment: Any) -> dict[str, Any]:
+    metadata = deployment.metadata
+    spec = deployment.spec
+    status = deployment.status
+    desired = int(spec.replicas or 0)
+    updated = int(status.updated_replicas or 0)
+    ready = int(status.ready_replicas or 0)
+    available = int(status.available_replicas or 0)
+    observed_generation = int(status.observed_generation or 0)
+    generation = int(metadata.generation or 0)
+    if observed_generation < generation:
+        rollout_status = "progressing"
+    elif updated >= desired and ready >= desired and available >= desired:
+        rollout_status = "healthy"
+    else:
+        rollout_status = "degraded"
+    return {
+        "namespace": metadata.namespace,
+        "deployment": metadata.name,
+        "status": rollout_status,
+        "message": (
+            f"{ready}/{desired} ready, {updated}/{desired} updated, "
+            f"{available}/{desired} available"
+        ),
+        "raw": {
+            "source_link": f"kubernetes://{metadata.namespace}/rollouts/{metadata.name}",
+            "generation": generation,
+            "observed_generation": observed_generation,
+        },
+    }
+
+
+def _kubernetes_replica_set_payload(replica_set: Any) -> dict[str, Any]:
+    metadata = replica_set.metadata
+    spec = replica_set.spec
+    status = replica_set.status
+    pod_spec = replica_set.spec.template.spec
+    containers = list(getattr(pod_spec, "containers", None) or [])
+    return {
+        "namespace": metadata.namespace,
+        "name": metadata.name,
+        "deployment": _kubernetes_replica_set_deployment(replica_set),
+        "desired_replicas": spec.replicas,
+        "ready_replicas": status.ready_replicas,
+        "images": [container.image for container in containers if container.image],
+        "raw": {
+            "source_link": f"kubernetes://{metadata.namespace}/replicasets/{metadata.name}",
+            "uid": metadata.uid,
+        },
+    }
+
+
+def _kubernetes_replica_set_deployment(replica_set: Any) -> str | None:
+    for owner in replica_set.metadata.owner_references or []:
+        if owner.kind == "Deployment":
+            return owner.name
+    return None
+
+
+def _kubernetes_selector(deployment: Any) -> str | None:
+    match_labels = deployment.spec.selector.match_labels or {}
+    if not match_labels:
+        return None
+    return ",".join(f"{key}={value}" for key, value in sorted(match_labels.items()))
+
+
+def _kubernetes_event_sort_key(event: Any) -> str:
+    timestamp = (
+        getattr(event, "event_time", None)
+        or getattr(event, "last_timestamp", None)
+        or getattr(event, "first_timestamp", None)
+        or getattr(event.metadata, "creation_timestamp", None)
+    )
+    return _isoformat(timestamp) or ""
+
+
+def _kubernetes_http_exception(exc: Exception) -> HTTPException:
+    status = getattr(exc, "status", None)
+    reason = getattr(exc, "reason", None)
+    if status is not None:
+        status_code = 404 if status == 404 else 502
+        return HTTPException(
+            status_code=status_code,
+            detail=f"Kubernetes API request failed with HTTP {status}: {reason or 'error'}",
+        )
+    return HTTPException(
+        status_code=502,
+        detail=f"Kubernetes API request failed: {type(exc).__name__}",
+    )
 
 
 async def _github_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -544,6 +924,37 @@ def _github_error(response: httpx.Response) -> str:
         return f"GitHub API request failed with HTTP {response.status_code}"
     message = payload.get("message") if isinstance(payload, dict) else None
     return str(message or f"GitHub API request failed with HTTP {response.status_code}")
+
+
+def _required_argument(arguments: dict[str, Any], name: str) -> str:
+    value = _optional_string(arguments.get(name))
+    if not value:
+        raise HTTPException(status_code=400, detail=f"{name} is required")
+    return value
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _isoformat(value: Any) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
 
 
 def _limit(arguments: dict[str, Any], *, default: int, maximum: int) -> int:

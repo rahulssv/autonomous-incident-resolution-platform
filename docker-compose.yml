@@ -41,9 +41,22 @@ services:
 
   kubernetes-mcp:
     build: .
+    user: "${AIRP_KUBERNETES_MCP_RUN_AS_UID:-1000}:${AIRP_KUBERNETES_MCP_RUN_AS_GID:-1000}"
     command: ["uvicorn", "airp.dev.local_mcp:app", "--host", "0.0.0.0", "--port", "8080"]
     environment:
       AIRP_LOCAL_MCP_SERVER: kubernetes
+      AIRP_KUBERNETES_MCP_MODE: ${AIRP_KUBERNETES_MCP_MODE:-fixture}
+      AIRP_KUBERNETES_KUBECONFIG: ${AIRP_KUBERNETES_KUBECONFIG:-/tmp/kubeconfig}
+      AIRP_KUBERNETES_CONTEXT: ${AIRP_KUBERNETES_CONTEXT:-}
+      AIRP_KUBERNETES_DEFAULT_NAMESPACE: ${AIRP_KUBERNETES_DEFAULT_NAMESPACE:-default}
+      AIRP_KUBERNETES_MCP_NAMESPACE_ALLOWLIST: ${AIRP_KUBERNETES_MCP_NAMESPACE_ALLOWLIST:-}
+      KUBECONFIG: ${AIRP_KUBERNETES_KUBECONFIG:-/tmp/kubeconfig}
+      HOME: /tmp
+    volumes:
+      - type: bind
+        source: ${AIRP_KUBECONFIG_HOST_PATH:-/dev/null}
+        target: ${AIRP_KUBERNETES_KUBECONFIG:-/tmp/kubeconfig}
+        read_only: true
     ports:
       - "8091:8080"
     healthcheck:
