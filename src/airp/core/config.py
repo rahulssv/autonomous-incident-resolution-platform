@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     mcp_read_retry_attempts: int = Field(default=2, ge=1, le=5)
     mcp_read_retry_min_backoff_seconds: float = Field(default=0.1, ge=0.0)
     mcp_read_retry_max_backoff_seconds: float = Field(default=1.0, ge=0.0)
+    readiness_active_checks_enabled: bool = False
+    readiness_probe_timeout_seconds: float = Field(default=2.0, gt=0.0)
     github_issue_creation_enabled: bool = False
     slack_notifications_enabled: bool = False
     remediation_pr_creation_enabled: bool = False

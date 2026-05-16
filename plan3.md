@@ -70,7 +70,7 @@ Verified from the current repository on 2026-05-16:
 - RCA fallback reasoning uses DockerHub `source_commit_sha` when present, but full AKS image ID to DockerHub digest to GitHub commit correlation is still pending.
 - Current Temporal workflow invokes a LangGraph supervisor through the `agent_graph_run` activity.
 - Current GenAI Hub integration is used as an optional LLM/embedding adapter; RCA prompt/model-call persistence is implemented, while broader production prompt templates are still pending.
-- Current verification baseline is `./scripts/verify.sh` with 50 passing tests.
+- Current verification baseline is `./scripts/verify.sh` with 61 passing tests.
 
 ## Remaining Work Summary
 
@@ -303,8 +303,8 @@ Tasks:
 - [x] Store Kubernetes RCA evidence in `evidence_items`.
 - [x] Add live MCP response schema validation for Kubernetes payloads before storage.
 - [x] Add evidence source links where possible.
-- [ ] Add partial-collection error details when the Kubernetes MCP server returns partial data.
-- [ ] Add runbook for Kubernetes MCP outage.
+- [x] Add partial-collection error details when the Kubernetes MCP server returns partial data.
+- [x] Add runbook for Kubernetes MCP outage.
 
 Acceptance criteria:
 
@@ -345,7 +345,8 @@ Tasks:
 - [ ] Block force-push and branch deletion.
 - [ ] Block secret file reads where possible.
 - [x] Add live MCP response schema validation for GitHub payloads before storage.
-- [ ] Add partial-collection error details when the GitHub MCP server returns partial data.
+- [x] Add partial-collection error details when the GitHub MCP server returns partial data.
+- [x] Add runbook for GitHub MCP outage.
 - [ ] Persist GitHub issues, PRs, comments, branches, and external IDs in `github_artifacts`.
 
 Acceptance criteria:
@@ -637,8 +638,9 @@ Tasks:
 - [ ] Track approval latency.
 - [ ] Add structured logging with incident ID, workflow ID, request ID, and correlation ID.
 - [x] Add readiness configuration checks for Kubernetes MCP, GitHub MCP, and DockerHub.
-- [ ] Add dependency health checks for PostgreSQL, Redis, Temporal, Event Hubs, GenAI Hub, Kubernetes MCP, GitHub MCP, DockerHub, and Slack.
-- [ ] Add readiness behavior that fails when required dependencies are unavailable.
+- [x] Add active dependency health checks for PostgreSQL, Redis, Temporal, Event Hubs, GenAI Hub, Kubernetes MCP, GitHub MCP, and DockerHub.
+- [ ] Add Slack dependency health check.
+- [x] Add readiness behavior that degrades when required dependencies are unavailable.
 - [ ] Add Grafana dashboard JSON or provisioning docs.
 - [ ] Add runbooks for dependency failures.
 
@@ -852,6 +854,7 @@ Highest-priority remaining engineering tasks:
 - [ ] Add Entra ID issuer discovery, JWKS caching, role validation, and route-level authorization.
 - [ ] Validate Event Hubs alert consumer and sample publisher against the real Azure Event Hubs Kafka endpoint.
 - [x] Add API readiness behavior for Kubernetes MCP, GitHub MCP, and DockerHub configuration.
+- [x] Add active readiness checks for PostgreSQL, Redis, Temporal, Event Hubs, GenAI Hub, Kubernetes MCP, GitHub MCP, and DockerHub.
 - [ ] Add metrics and full health/readiness behavior for API, alert consumer, and Temporal worker.
 - [ ] Add Temporal replay tests and worker restart tests.
 - [ ] Add graph checkpoints and resume behavior for LangGraph supervisor state.
@@ -941,7 +944,7 @@ Live read integrations:
 - [x] Implement live GitHub MCP reads for repository metadata, branches, commits, changed files, merged PRs, releases, and prior issues.
 - [x] Add live MCP response schema validation before evidence storage.
 - [x] Add evidence source links where possible.
-- [ ] Add partial-collection error details when upstream MCP transports return partial data.
+- [x] Add partial-collection error details when upstream MCP transports return partial data.
 - [x] Add transport-level tests for success, timeout, 429, 5xx, and malformed payloads.
 
 Agent layer:
@@ -975,8 +978,9 @@ API completion:
 Operations, security, deployment, and handoff:
 
 - [ ] Add OpenTelemetry instrumentation, Prometheus metrics, and Grafana dashboards.
-- [ ] Add active dependency health checks for PostgreSQL, Redis, Temporal, Event Hubs, GenAI Hub, Kubernetes MCP, GitHub MCP, DockerHub, and Slack.
-- [ ] Add readiness behavior that fails when required dependencies are unavailable.
+- [x] Add active dependency health checks for PostgreSQL, Redis, Temporal, Event Hubs, GenAI Hub, Kubernetes MCP, GitHub MCP, and DockerHub.
+- [ ] Add Slack dependency health check.
+- [x] Add readiness behavior that degrades when required dependencies are unavailable.
 - [ ] Add request body limits, rate limiting, production CORS validation, and security headers.
 - [ ] Add CI/CD for lint, tests, migrations, Docker build, image scanning, SBOM, Helm checks, release, deploy, and rollback.
 - [ ] Deploy API, alert consumer, and Temporal worker to Azure AKS with production auth and Kubernetes secrets.
@@ -1073,26 +1077,62 @@ Verification:
 
 - `./scripts/verify.sh` passes with 50 tests.
 
-## Immediate Next Sprint
+## Completed Sprint: MCP HTTP Read Transport Foundation
 
 Sprint goal: implement the first live Kubernetes MCP and GitHub MCP read transports behind the existing read-only configuration, allowlists, timeouts, and retry guardrails.
 
 Tasks:
 
-1. [ ] Define the concrete MCP HTTP request/response contract for Kubernetes and GitHub read tools.
-2. [ ] Add Kubernetes MCP HTTP client transport for `list_pods`, `get_pod`, `get_pod_logs`, `list_events`, `get_deployment`, `get_rollout_status`, and `list_replicasets`.
-3. [ ] Add GitHub MCP HTTP client transport for repository metadata, commits, merged PRs, changed files, releases, and prior issues.
-4. [ ] Add transport-level tests with `httpx.MockTransport` for success, timeout, 429, 5xx, and malformed payload cases.
-5. [ ] Add bounded log-window controls for Kubernetes pod logs by line count and optional time range.
-6. [ ] Add MCP evidence source links and collection error details where the upstream transport returns partial data.
-7. [ ] Add API readiness details that distinguish configured-but-unreachable from configured-but-not-yet-pinged once active dependency checks are available.
+1. [x] Define the concrete MCP HTTP request/response contract for Kubernetes and GitHub read tools.
+2. [x] Add Kubernetes MCP HTTP client transport for `list_pods`, `get_pod`, `get_pod_logs`, `list_events`, `get_deployment`, `get_rollout_status`, and `list_replicasets`.
+3. [x] Add GitHub MCP HTTP client transport for repository metadata, branches, commit-by-SHA, commits by time window, merged PRs, changed files, releases, and prior issues.
+4. [x] Add transport-level tests with `httpx.MockTransport` for success, timeout, 429, 5xx, and malformed payload cases.
+5. [x] Add bounded log-window controls for Kubernetes pod logs by line count and optional time range.
+6. [x] Add MCP evidence source links where available.
+7. [x] Add API readiness details that mark MCP reachability as `not_checked` until active dependency checks are implemented.
+8. [x] Keep GitHub issue creation, Slack sends, remediation PR creation, and documentation publishing disabled.
+
+Verification:
+
+- `./scripts/verify.sh` passes with 56 tests.
+
+## Completed Sprint: Active Readiness and Partial Evidence Resilience
+
+Sprint goal: add active dependency checks and partial-collection resilience around the live read transports.
+
+Tasks:
+
+1. [x] Add active readiness probes for Kubernetes MCP, GitHub MCP, DockerHub, GenAI Hub, Redis, PostgreSQL, Temporal, and Event Hubs without leaking secrets.
+2. [x] Make `/api/readiness` degrade when required dependencies are unreachable.
+3. [x] Preserve upstream MCP partial-collection warnings and errors in `collection_errors`.
+4. [x] Add timeline events for partial evidence collection with usable evidence.
+5. [x] Add runbooks for Kubernetes MCP, GitHub MCP, DockerHub, and GenAI Hub outages.
+6. [x] Keep GitHub issue creation, Slack sends, remediation PR creation, and documentation publishing disabled.
+
+Verification:
+
+- `./scripts/verify.sh` passes with 61 tests.
+
+## Immediate Next Sprint
+
+Sprint goal: add Remediation and Documentation LangGraph node foundations without enabling external writes.
+
+Tasks:
+
+1. [ ] Define typed Remediation Agent output schema with remediation plan, rollback plan, test plan, risk score, approval requirement, and blocked-path findings.
+2. [ ] Implement Remediation Agent LangGraph node that reads RCA hypotheses, evidence summaries, repository context, and policy flags.
+3. [ ] Persist generated remediation plan records without creating branches or PRs.
+4. [ ] Define typed Documentation Agent output schema for final RCA report drafts.
+5. [ ] Implement Documentation Agent LangGraph node that drafts a final report from timeline/evidence/hypotheses when invoked.
+6. [ ] Extend the supervisor graph routing to include Remediation and Documentation nodes behind safe conditions.
+7. [ ] Add unit tests for Remediation and Documentation nodes with mocked GenAI Hub outputs and deterministic fallbacks.
 8. [ ] Keep GitHub issue creation, Slack sends, remediation PR creation, and documentation publishing disabled.
 
 ## Verified Remaining Critical Path
 
 Verified from the repository on 2026-05-16:
 
-1. Live integrations: implement real Kubernetes MCP and GitHub MCP transports, then validate DockerHub live tag/digest lookup against public AIRP-client images.
+1. Live validation: validate Kubernetes MCP, GitHub MCP, and DockerHub read transports against deployed AIRP-client infrastructure and public AIRP-client images.
 2. Governance: wire the existing feature flags, idempotency helper, repository allowlists, and namespace allowlists into future write paths, then add approval policy and blocked-path policy before any GitHub or Slack writes.
 3. Agent completion: implement Remediation and Documentation as LangGraph nodes with typed Pydantic outputs, prompts, tests, and workflow states.
 4. Memory: add pgvector migration, persist embedding vectors, and switch incident search to vector-backed ranking when query text is present.

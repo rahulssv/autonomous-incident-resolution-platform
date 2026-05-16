@@ -77,6 +77,19 @@ def optional_dict(payload: Any, *keys: str) -> dict[str, Any] | None:
     raise MCPToolResponseError("Expected MCP response object")
 
 
+def response_messages(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    messages: list[str] = []
+    for key in ("collection_errors", "errors", "warnings"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            messages.append(value)
+        elif isinstance(value, list):
+            messages.extend(str(item) for item in value if item)
+    return messages
+
+
 def _tool_call_url(endpoint_url: str) -> str:
     url = endpoint_url.rstrip("/")
     if url.endswith("/tools/call"):

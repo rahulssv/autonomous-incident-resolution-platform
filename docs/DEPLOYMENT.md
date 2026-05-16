@@ -94,6 +94,8 @@ AIRP_GITHUB_MCP_READ_TIMEOUT_SECONDS=20
 AIRP_DOCKERHUB_BASE_URL=https://hub.docker.com/v2
 AIRP_DOCKERHUB_READ_TIMEOUT_SECONDS=20
 AIRP_MCP_READ_RETRY_ATTEMPTS=2
+AIRP_READINESS_ACTIVE_CHECKS_ENABLED=false
+AIRP_READINESS_PROBE_TIMEOUT_SECONDS=2
 ```
 
 Namespace allowlisting should include only AKS namespaces that run AIRP-client
@@ -109,6 +111,7 @@ Check the configuration surface after deployment:
 
 ```bash
 curl http://localhost:8080/api/readiness
+curl http://localhost:8080/api/readiness?active=true
 ```
 
 The current read-only MCP HTTP bridge contract is intentionally small:
@@ -131,6 +134,11 @@ Accept: application/json
 Responses may be direct JSON, `{"result": ...}`, `{"data": ...}`, or MCP-style
 `{"content": [{"type": "json", "json": ...}]}`. AIRP currently uses only
 read-only tool names under the `kubernetes.*` and `github.*` prefixes.
+
+Keep `AIRP_READINESS_ACTIVE_CHECKS_ENABLED=false` for high-frequency Kubernetes
+readiness probes unless the target dependencies can tolerate periodic active checks.
+Use `?active=true` for operator diagnostics or enable the flag in environments where
+active readiness should gate traffic.
 
 ## 7. Database and Redis
 
@@ -212,6 +220,7 @@ kubectl -n airp get pods
 kubectl -n airp port-forward svc/airp-airp 8080:80
 curl http://localhost:8080/api/health
 curl http://localhost:8080/api/readiness
+curl http://localhost:8080/api/readiness?active=true
 ```
 
 Run the alert consumer in the same environment:
@@ -248,3 +257,34 @@ The Helm chart includes separate Deployments for the API, alert consumer, and Te
 - Use read-only Kubernetes MCP permissions and an explicit AKS namespace allowlist for MVP.
 - Use least-privilege GitHub MCP permissions scoped to AIRP-client repositories and keep `AIRP_GITHUB_MCP_REPOSITORY_ALLOWLIST` scoped to `AIRP-client/*` or narrower.
 - Require human approval before repository write actions.
+
+## 11. Dependency Outage Runbook
+
+Use `/api/readiness?active=true` to identify failing dependencies. The response does
+not include secrets and reports each dependency as `ready`, `disabled`,
+`misconfigured`, or `unavailable`.
+
+Kubernetes MCP outage:
+
+- Confirm `AIRP_KUBERNETES_MCP_URL`, namespace allowlist, and AKS read-only identity.
+- Check the Kubernetes MCP server logs and AKS API connectivity.
+- AIRP should continue incident processing with partial or unavailable Kubernetes
+  evidence events in the incident timeline.
+
+GitHub MCP outage:
+
+- Confirm `AIRP_GITHUB_MCP_URL` and `AIRP_GITHUB_MCP_REPOSITORY_ALLOWLIST`.
+- Check GitHub MCP server logs and AIRP-client credential scope.
+- Repository write actions remain disabled unless policy flags are explicitly enabled.
+
+DockerHub outage:
+
+- Confirm outbound access to `AIRP_DOCKERHUB_BASE_URL`.
+- RCA can still use Kubernetes and GitHub evidence, but image digest/source metadata
+  may be partial.
+
+GenAI Hub outage:
+
+- Confirm `AIRP_GATEWAY_BASE_URL` and secret-backed `AIRP_GATEWAY_API_KEY`.
+- Low-evidence or model-failure RCA paths should escalate instead of fabricating a
+  conclusion.

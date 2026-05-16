@@ -283,6 +283,39 @@ async def test_kubernetes_mcp_http_transport_collects_live_evidence() -> None:
 
 
 @pytest.mark.asyncio
+async def test_kubernetes_mcp_collects_partial_evidence_when_one_tool_fails() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        tool = body["tool"]
+        if tool == "kubernetes.get_pod_logs":
+            return httpx.Response(500, json={"error": "logs temporarily unavailable"})
+        responses = {
+            "kubernetes.list_pods": {
+                "pods": [{"namespace": "shopfast", "name": "checkout-api-abc123"}],
+                "warnings": ["pod data may be delayed"],
+            },
+            "kubernetes.list_events": {"events": []},
+        }
+        return httpx.Response(200, json={"result": responses[tool]})
+
+    client = KubernetesMCPClient(
+        transport="mcp",
+        endpoint_url="https://kubernetes-mcp.example",
+        http_transport=httpx.MockTransport(handler),
+    )
+
+    evidence = await client.collect_evidence(
+        namespace="shopfast",
+        pod_name="checkout-api-abc123",
+    )
+
+    assert evidence.pods[0].name == "checkout-api-abc123"
+    assert evidence.logs == []
+    assert "pod data may be delayed" in evidence.collection_errors
+    assert "get_pod_logs: HTTPStatusError" in evidence.collection_errors
+
+
+@pytest.mark.asyncio
 async def test_github_mcp_http_transport_collects_live_repository_evidence() -> None:
     seen_tools: list[str] = []
 
@@ -362,6 +395,48 @@ async def test_github_mcp_http_transport_collects_live_repository_evidence() -> 
         "github.lookup_commit",
         "github.lookup_branches",
     ]
+
+
+@pytest.mark.asyncio
+async def test_github_mcp_collects_partial_evidence_when_one_tool_fails() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        tool = body["tool"]
+        if tool == "github.lookup_changed_files":
+            return httpx.Response(500, json={"error": "files temporarily unavailable"})
+        responses = {
+            "github.get_repository": {
+                "repository": {
+                    "name": "checkout-api",
+                    "owner": "AIRP-client",
+                    "default_branch": "main",
+                }
+            },
+            "github.lookup_commits": {
+                "commits": [{"sha": "abc123", "message": "Change retry policy"}],
+                "warnings": ["commit list truncated"],
+            },
+            "github.lookup_merged_prs": {"merged_prs": []},
+            "github.lookup_releases": {"releases": []},
+            "github.lookup_prior_issues": {"issues": []},
+        }
+        return httpx.Response(200, json={"result": responses[tool]})
+
+    client = GitHubMCPClient(
+        transport="mcp",
+        endpoint_url="https://github-mcp.example",
+        http_transport=httpx.MockTransport(handler),
+    )
+
+    evidence = await client.collect_evidence(
+        repository_url="https://github.com/AIRP-client/checkout-api"
+    )
+
+    assert evidence.default_branch == "main"
+    assert evidence.commits[0].sha == "abc123"
+    assert evidence.changed_files == []
+    assert "commit list truncated" in evidence.collection_errors
+    assert "lookup_changed_files: HTTPStatusError" in evidence.collection_errors
 
 
 @pytest.mark.asyncio

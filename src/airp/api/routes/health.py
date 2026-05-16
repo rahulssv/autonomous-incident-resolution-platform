@@ -1,8 +1,15 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from airp.core.config import Settings, get_settings
+from airp.core.readiness import (
+    DependencyProbeRunner,
+    Probe,
+    apply_active_probes,
+    default_probe_map,
+    dependency_status,
+)
 from airp.schemas.common import DependencyReadiness, HealthResponse, ReadinessResponse
 
 router = APIRouter()
@@ -21,8 +28,58 @@ async def health(settings: Annotated[Settings, Depends(get_settings)]) -> Health
 @router.get("/readiness", response_model=ReadinessResponse)
 async def readiness(
     settings: Annotated[Settings, Depends(get_settings)],
+    active: Annotated[bool | None, Query()] = None,
+) -> ReadinessResponse:
+    active_checks = settings.readiness_active_checks_enabled if active is None else active
+    return await build_readiness_response(settings, active_checks=active_checks)
+
+
+async def build_readiness_response(
+    settings: Settings,
+    *,
+    active_checks: bool = False,
+    probes: dict[str, Probe] | None = None,
 ) -> ReadinessResponse:
     dependencies = {
+        "postgres": _configured_dependency(
+            configured=bool(settings.database_url),
+            required=True,
+            details={"check_mode": "configuration_only", "reachability": "not_checked"},
+        ),
+        "redis": _configured_dependency(
+            configured=bool(settings.redis_url),
+            required=True,
+            details={"check_mode": "configuration_only", "reachability": "not_checked"},
+        ),
+        "temporal": _configured_dependency(
+            configured=bool(settings.temporal_address and settings.temporal_namespace),
+            required=settings.temporal_start_workflows,
+            details={
+                "namespace": settings.temporal_namespace,
+                "task_queue": settings.temporal_task_queue,
+                "check_mode": "configuration_only",
+                "reachability": "not_checked",
+            },
+        ),
+        "event_hubs": _configured_dependency(
+            configured=bool(settings.kafka_bootstrap_servers and settings.kafka_password),
+            required=bool(settings.kafka_bootstrap_servers or settings.kafka_password),
+            details={
+                "alerts_raw_topic": settings.kafka_alerts_raw_topic,
+                "deadletter_topic": settings.kafka_deadletter_topic,
+                "check_mode": "configuration_only",
+                "reachability": "not_checked",
+            },
+        ),
+        "genaihub": _configured_dependency(
+            configured=bool(settings.gateway_base_url and settings.gateway_api_key),
+            required=bool(settings.gateway_base_url or settings.gateway_api_key),
+            details={
+                "base_url": str(settings.gateway_base_url) if settings.gateway_base_url else None,
+                "check_mode": "configuration_only",
+                "reachability": "not_checked",
+            },
+        ),
         "kubernetes_mcp": _mcp_dependency(
             required=settings.agent_read_only_evidence_enabled,
             transport=settings.kubernetes_mcp_transport,
@@ -53,16 +110,39 @@ async def readiness(
             },
         ),
     }
-    status = (
-        "ready"
-        if all(item.status in {"ready", "disabled", "warning"} for item in dependencies.values())
-        else "degraded"
-    )
+    if active_checks:
+        runner = DependencyProbeRunner(settings)
+        dependencies = await apply_active_probes(
+            dependencies,
+            probes=probes or default_probe_map(runner),
+            timeout_seconds=settings.readiness_probe_timeout_seconds,
+        )
     return ReadinessResponse(
-        status=status,
+        status=dependency_status(dependencies),
         service=settings.app_name,
         environment=settings.environment,
         dependencies=dependencies,
+    )
+
+
+def _configured_dependency(
+    *,
+    configured: bool,
+    required: bool,
+    details: dict,
+) -> DependencyReadiness:
+    if not required and not configured:
+        return DependencyReadiness(
+            status="disabled",
+            configured=False,
+            required=False,
+            details=details,
+        )
+    return DependencyReadiness(
+        status="ready" if configured else "misconfigured",
+        configured=configured,
+        required=required,
+        details=details,
     )
 
 

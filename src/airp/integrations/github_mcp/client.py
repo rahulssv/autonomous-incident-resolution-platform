@@ -5,7 +5,7 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, Field
 
-from airp.integrations.mcp_http import call_mcp_tool, item_list, optional_dict
+from airp.integrations.mcp_http import call_mcp_tool, item_list, optional_dict, response_messages
 
 
 class GitHubChangedFileEvidence(BaseModel):
@@ -87,6 +87,7 @@ class GitHubMCPClient:
         self.endpoint_url = endpoint_url.rstrip("/") if endpoint_url else None
         self.timeout_seconds = timeout_seconds
         self.http_transport = http_transport
+        self._last_collection_messages: list[str] = []
 
     async def list_org_repositories(self, org: str) -> list[dict[str, Any]]:
         if self.fixture and self.fixture.repository_url:
@@ -105,6 +106,7 @@ class GitHubMCPClient:
             "github.list_org_repositories",
             {"org": org},
         )
+        self._record_response_messages(payload)
         return item_list(payload, "repositories", "items")
 
     async def get_repository(self, repository_url: str) -> dict[str, Any] | None:
@@ -122,6 +124,7 @@ class GitHubMCPClient:
             "github.get_repository",
             {"repository_url": repository_url},
         )
+        self._record_response_messages(payload)
         return optional_dict(payload, "repository", "item")
 
     async def lookup_commits(
@@ -148,6 +151,7 @@ class GitHubMCPClient:
                 "limit": limit,
             },
         )
+        self._record_response_messages(payload)
         return item_list(payload, "commits", "items")
 
     async def lookup_commit(self, repository_url: str, sha: str) -> dict[str, Any] | None:
@@ -162,6 +166,7 @@ class GitHubMCPClient:
             "github.lookup_commit",
             {"repository_url": repository_url, "sha": sha},
         )
+        self._record_response_messages(payload)
         return optional_dict(payload, "commit", "item")
 
     async def lookup_merged_prs(
@@ -188,6 +193,7 @@ class GitHubMCPClient:
                 "limit": limit,
             },
         )
+        self._record_response_messages(payload)
         return item_list(payload, "merged_prs", "pull_requests", "items")
 
     async def lookup_changed_files(
@@ -216,6 +222,7 @@ class GitHubMCPClient:
                 "limit": limit,
             },
         )
+        self._record_response_messages(payload)
         return item_list(payload, "changed_files", "files", "items")
 
     async def lookup_releases(
@@ -235,6 +242,7 @@ class GitHubMCPClient:
             "github.lookup_releases",
             {"repository_url": repository_url, "limit": limit},
         )
+        self._record_response_messages(payload)
         return item_list(payload, "releases", "items")
 
     async def lookup_prior_issues(
@@ -259,6 +267,7 @@ class GitHubMCPClient:
                 "limit": limit,
             },
         )
+        self._record_response_messages(payload)
         return item_list(payload, "prior_issues", "issues", "items")
 
     async def lookup_branches(
@@ -273,6 +282,7 @@ class GitHubMCPClient:
             "github.lookup_branches",
             {"repository_url": repository_url, "limit": limit},
         )
+        self._record_response_messages(payload)
         return item_list(payload, "branches", "items")
 
     async def lookup_issue_by_idempotency_marker(
@@ -305,31 +315,76 @@ class GitHubMCPClient:
             changed_files = self._all_changed_files()
             return self.fixture.model_copy(update={"changed_files": changed_files})
 
-        repository = await self.get_repository(repository_url)
-        commits = [
-            GitHubCommitEvidence.model_validate(commit)
-            for commit in await self.lookup_commits(repository_url, since=since, until=until)
-        ]
-        merged_prs = [
-            GitHubPullRequestEvidence.model_validate(pull_request)
-            for pull_request in await self.lookup_merged_prs(
-                repository_url, since=since, until=until
-            )
-        ]
-        changed_files = [
-            GitHubChangedFileEvidence.model_validate(changed_file)
-            for changed_file in await self.lookup_changed_files(
-                repository_url, since=since, until=until
-            )
-        ]
-        releases = [
-            GitHubReleaseEvidence.model_validate(release)
-            for release in await self.lookup_releases(repository_url)
-        ]
-        prior_issues = [
-            GitHubIssueEvidence.model_validate(issue)
-            for issue in await self.lookup_prior_issues(repository_url)
-        ]
+        self._last_collection_messages = []
+        collection_errors: list[str] = []
+        repository = None
+        commits: list[GitHubCommitEvidence] = []
+        merged_prs: list[GitHubPullRequestEvidence] = []
+        changed_files: list[GitHubChangedFileEvidence] = []
+        releases: list[GitHubReleaseEvidence] = []
+        prior_issues: list[GitHubIssueEvidence] = []
+
+        try:
+            repository = await self.get_repository(repository_url)
+        except NotImplementedError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - preserve partial evidence
+            collection_errors.append(_collection_error("get_repository", exc))
+
+        try:
+            commits = [
+                GitHubCommitEvidence.model_validate(commit)
+                for commit in await self.lookup_commits(repository_url, since=since, until=until)
+            ]
+        except NotImplementedError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - preserve partial evidence
+            collection_errors.append(_collection_error("lookup_commits", exc))
+
+        try:
+            merged_prs = [
+                GitHubPullRequestEvidence.model_validate(pull_request)
+                for pull_request in await self.lookup_merged_prs(
+                    repository_url, since=since, until=until
+                )
+            ]
+        except NotImplementedError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - preserve partial evidence
+            collection_errors.append(_collection_error("lookup_merged_prs", exc))
+
+        try:
+            changed_files = [
+                GitHubChangedFileEvidence.model_validate(changed_file)
+                for changed_file in await self.lookup_changed_files(
+                    repository_url, since=since, until=until
+                )
+            ]
+        except NotImplementedError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - preserve partial evidence
+            collection_errors.append(_collection_error("lookup_changed_files", exc))
+
+        try:
+            releases = [
+                GitHubReleaseEvidence.model_validate(release)
+                for release in await self.lookup_releases(repository_url)
+            ]
+        except NotImplementedError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - preserve partial evidence
+            collection_errors.append(_collection_error("lookup_releases", exc))
+
+        try:
+            prior_issues = [
+                GitHubIssueEvidence.model_validate(issue)
+                for issue in await self.lookup_prior_issues(repository_url)
+            ]
+        except NotImplementedError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - preserve partial evidence
+            collection_errors.append(_collection_error("lookup_prior_issues", exc))
+
         return GitHubEvidenceBundle(
             repository_url=repository_url,
             default_branch=repository.get("default_branch") if repository else None,
@@ -338,6 +393,9 @@ class GitHubMCPClient:
             changed_files=changed_files,
             releases=releases,
             prior_issues=prior_issues,
+            collection_errors=list(
+                dict.fromkeys([*self._last_collection_messages, *collection_errors])
+            ),
             source_links=_source_links(
                 commits,
                 merged_prs,
@@ -405,6 +463,9 @@ class GitHubMCPClient:
             transport=self.http_transport,
         )
 
+    def _record_response_messages(self, payload: Any) -> None:
+        self._last_collection_messages.extend(response_messages(payload))
+
 
 def _repository_owner_name(repository_url: str) -> tuple[str | None, str | None]:
     path = repository_url.rstrip("/").removesuffix(".git").split("github.com/")[-1]
@@ -427,3 +488,7 @@ def _source_links(*values: Any) -> list[str]:
             if isinstance(link, str) and link:
                 links.append(link)
     return list(dict.fromkeys(links))
+
+
+def _collection_error(tool_name: str, exc: Exception) -> str:
+    return f"{tool_name}: {exc.__class__.__name__}"

@@ -341,7 +341,7 @@ def _unique_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 def _tool_call_event_type(tool_call: dict[str, Any]) -> str | None:
     status = tool_call.get("status")
-    if status in {"unavailable", "forbidden", "timeout"}:
+    if status in {"unavailable", "forbidden", "timeout", "partial"}:
         return f"rca.evidence_collection.{status}"
     return None
 

@@ -5,7 +5,7 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, Field
 
-from airp.integrations.mcp_http import call_mcp_tool, item_list, optional_dict
+from airp.integrations.mcp_http import call_mcp_tool, item_list, optional_dict, response_messages
 
 
 class KubernetesPodEvidence(BaseModel):
@@ -105,6 +105,7 @@ class KubernetesMCPClient:
         self.endpoint_url = endpoint_url.rstrip("/") if endpoint_url else None
         self.timeout_seconds = timeout_seconds
         self.http_transport = http_transport
+        self._last_collection_messages: list[str] = []
 
     async def list_pods(self, namespace: str | None = None) -> list[dict[str, Any]]:
         if self.fixture is not None:
@@ -117,6 +118,7 @@ class KubernetesMCPClient:
             "kubernetes.list_pods",
             {"namespace": namespace},
         )
+        self._record_response_messages(payload)
         return item_list(payload, "pods", "items")
 
     async def get_pod(self, namespace: str, pod_name: str) -> dict[str, Any] | None:
@@ -129,6 +131,7 @@ class KubernetesMCPClient:
             "kubernetes.get_pod",
             {"namespace": namespace, "pod_name": pod_name},
         )
+        self._record_response_messages(payload)
         return optional_dict(payload, "pod", "item")
 
     async def get_pod_logs(
@@ -158,6 +161,7 @@ class KubernetesMCPClient:
                 "time_range": time_range,
             },
         )
+        self._record_response_messages(payload)
         return _log_text(payload, limit_lines)
 
     async def list_events(self, namespace: str) -> list[dict[str, Any]]:
@@ -171,6 +175,7 @@ class KubernetesMCPClient:
             "kubernetes.list_events",
             {"namespace": namespace},
         )
+        self._record_response_messages(payload)
         return item_list(payload, "events", "items")
 
     async def get_events(self, namespace: str) -> list[dict[str, Any]]:
@@ -186,6 +191,7 @@ class KubernetesMCPClient:
             "kubernetes.get_deployment",
             {"namespace": namespace, "deployment": deployment},
         )
+        self._record_response_messages(payload)
         return optional_dict(payload, "deployment", "item")
 
     async def get_rollout_status(
@@ -200,6 +206,7 @@ class KubernetesMCPClient:
             "kubernetes.get_rollout_status",
             {"namespace": namespace, "deployment": deployment},
         )
+        self._record_response_messages(payload)
         return optional_dict(payload, "rollout_status", "item")
 
     async def list_replicasets(
@@ -216,6 +223,7 @@ class KubernetesMCPClient:
             "kubernetes.list_replicasets",
             {"namespace": namespace, "deployment": deployment},
         )
+        self._record_response_messages(payload)
         return item_list(payload, "replica_sets", "items")
 
     async def collect_evidence(
@@ -241,39 +249,79 @@ class KubernetesMCPClient:
                 collection_errors=["namespace is required for Kubernetes evidence collection"],
             )
 
-        pods = [
-            KubernetesPodEvidence.model_validate(pod)
-            for pod in await self.list_pods(namespace)
-            if pod_name is None or pod.get("name") == pod_name
-        ]
-        log_lines = []
+        self._last_collection_messages = []
+        collection_errors: list[str] = []
+
+        pods: list[KubernetesPodEvidence] = []
+        try:
+            pods = [
+                KubernetesPodEvidence.model_validate(pod)
+                for pod in await self.list_pods(namespace)
+                if pod_name is None or pod.get("name") == pod_name
+            ]
+        except NotImplementedError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - preserve partial evidence
+            collection_errors.append(_collection_error("list_pods", exc))
+
+        log_lines: list[str] = []
         if pod_name:
-            log_text = await self.get_pod_logs(namespace, pod_name, container)
-            log_lines = log_text.splitlines()
-        events = [
-            KubernetesEventEvidence.model_validate(event)
-            for event in await self.list_events(namespace)
-        ]
+            try:
+                log_text = await self.get_pod_logs(namespace, pod_name, container)
+                log_lines = log_text.splitlines()
+            except NotImplementedError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - preserve partial evidence
+                collection_errors.append(_collection_error("get_pod_logs", exc))
+
+        events: list[KubernetesEventEvidence] = []
+        try:
+            events = [
+                KubernetesEventEvidence.model_validate(event)
+                for event in await self.list_events(namespace)
+            ]
+        except NotImplementedError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - preserve partial evidence
+            collection_errors.append(_collection_error("list_events", exc))
+
         deployment_state = None
         rollout_status = None
         replica_sets: list[KubernetesReplicaSetEvidence] = []
         if deployment:
-            deployment_payload = await self.get_deployment(namespace, deployment)
-            rollout_payload = await self.get_rollout_status(namespace, deployment)
-            deployment_state = (
-                KubernetesDeploymentEvidence.model_validate(deployment_payload)
-                if deployment_payload
-                else None
-            )
-            rollout_status = (
-                KubernetesRolloutEvidence.model_validate(rollout_payload)
-                if rollout_payload
-                else None
-            )
-            replica_sets = [
-                KubernetesReplicaSetEvidence.model_validate(item)
-                for item in await self.list_replicasets(namespace, deployment)
-            ]
+            try:
+                deployment_payload = await self.get_deployment(namespace, deployment)
+                deployment_state = (
+                    KubernetesDeploymentEvidence.model_validate(deployment_payload)
+                    if deployment_payload
+                    else None
+                )
+            except NotImplementedError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - preserve partial evidence
+                collection_errors.append(_collection_error("get_deployment", exc))
+
+            try:
+                rollout_payload = await self.get_rollout_status(namespace, deployment)
+                rollout_status = (
+                    KubernetesRolloutEvidence.model_validate(rollout_payload)
+                    if rollout_payload
+                    else None
+                )
+            except NotImplementedError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - preserve partial evidence
+                collection_errors.append(_collection_error("get_rollout_status", exc))
+
+            try:
+                replica_sets = [
+                    KubernetesReplicaSetEvidence.model_validate(item)
+                    for item in await self.list_replicasets(namespace, deployment)
+                ]
+            except NotImplementedError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - preserve partial evidence
+                collection_errors.append(_collection_error("list_replicasets", exc))
 
         return KubernetesEvidenceBundle(
             namespace=namespace,
@@ -294,6 +342,9 @@ class KubernetesMCPClient:
             deployment_state=deployment_state,
             rollout_status=rollout_status,
             replica_sets=replica_sets,
+            collection_errors=list(
+                dict.fromkeys([*self._last_collection_messages, *collection_errors])
+            ),
             source_links=_source_links(
                 pods,
                 events,
@@ -397,6 +448,9 @@ class KubernetesMCPClient:
             transport=self.http_transport,
         )
 
+    def _record_response_messages(self, payload: Any) -> None:
+        self._last_collection_messages.extend(response_messages(payload))
+
 
 def _log_text(payload: Any, limit_lines: int) -> str:
     if isinstance(payload, str):
@@ -424,3 +478,7 @@ def _source_links(*values: Any) -> list[str]:
             if isinstance(link, str) and link:
                 links.append(link)
     return list(dict.fromkeys(links))
+
+
+def _collection_error(tool_name: str, exc: Exception) -> str:
+    return f"{tool_name}: {exc.__class__.__name__}"

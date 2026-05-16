@@ -10,7 +10,15 @@ from airp.core.allowlists import is_github_repository_allowed, is_namespace_allo
 from airp.integrations.genaihub.redaction import redact_payload
 from airp.integrations.mcp_retry import is_timeout_error, read_with_retries
 
-ToolCallStatus = Literal["completed", "failed", "skipped", "unavailable", "forbidden", "timeout"]
+ToolCallStatus = Literal[
+    "completed",
+    "partial",
+    "failed",
+    "skipped",
+    "unavailable",
+    "forbidden",
+    "timeout",
+]
 
 
 class PlannedToolCall(BaseModel):
@@ -182,18 +190,31 @@ class RCAEvidenceCollector:
 
         data = redact_payload(bundle.model_dump(mode="json", exclude_none=True))
         evidence.kubernetes = data
+        status = _collection_status(
+            data,
+            evidence_keys=(
+                "pods",
+                "logs",
+                "events",
+                "deployment_state",
+                "rollout_status",
+                "replica_sets",
+            ),
+        )
+        errors = _collection_errors(data)
         evidence.tool_calls.append(
             self._tool_call(
                 "kubernetes_mcp",
                 "collect_evidence",
                 parameters,
-                "completed",
+                status,
                 started,
                 result_summary=(
                     f"{len(data.get('pods', []))} pods, "
                     f"{len(data.get('logs', []))} log windows, "
                     f"{len(data.get('events', []))} events"
                 ),
+                error="; ".join(errors) if errors else None,
             )
         )
 
@@ -277,18 +298,24 @@ class RCAEvidenceCollector:
 
         data = redact_payload(bundle.model_dump(mode="json", exclude_none=True))
         evidence.github = data
+        status = _collection_status(
+            data,
+            evidence_keys=("commits", "merged_prs", "changed_files", "releases", "prior_issues"),
+        )
+        errors = _collection_errors(data)
         evidence.tool_calls.append(
             self._tool_call(
                 "github_mcp",
                 "collect_evidence",
                 parameters,
-                "completed",
+                status,
                 started,
                 result_summary=(
                     f"{len(data.get('commits', []))} commits, "
                     f"{len(data.get('merged_prs', []))} merged PRs, "
                     f"{len(data.get('prior_issues', []))} prior issues"
                 ),
+                error="; ".join(errors) if errors else None,
             )
         )
 
@@ -393,3 +420,20 @@ class RCAEvidenceCollector:
             result_summary=result_summary,
             error=error,
         )
+
+
+def _collection_errors(data: dict[str, Any]) -> list[str]:
+    errors = data.get("collection_errors")
+    if isinstance(errors, list):
+        return [str(error) for error in errors if error]
+    if isinstance(errors, str) and errors:
+        return [errors]
+    return []
+
+
+def _collection_status(data: dict[str, Any], *, evidence_keys: tuple[str, ...]) -> ToolCallStatus:
+    errors = _collection_errors(data)
+    if not errors:
+        return "completed"
+    has_evidence = any(bool(data.get(key)) for key in evidence_keys)
+    return "partial" if has_evidence else "failed"
