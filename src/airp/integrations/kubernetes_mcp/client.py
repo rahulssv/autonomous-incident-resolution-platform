@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -85,10 +85,20 @@ class KubernetesEvidenceBundle(BaseModel):
 class KubernetesMCPClient:
     """Thin boundary for future AKS read-only MCP transport implementation."""
 
-    def __init__(self, fixture: KubernetesEvidenceBundle | dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        fixture: KubernetesEvidenceBundle | dict[str, Any] | None = None,
+        *,
+        transport: Literal["disabled", "mcp"] = "disabled",
+        endpoint_url: str | None = None,
+        timeout_seconds: float = 20.0,
+    ) -> None:
         self.fixture = (
             KubernetesEvidenceBundle.model_validate(fixture) if fixture is not None else None
         )
+        self.transport = transport
+        self.endpoint_url = endpoint_url.rstrip("/") if endpoint_url else None
+        self.timeout_seconds = timeout_seconds
 
     async def list_pods(self, namespace: str | None = None) -> list[dict[str, Any]]:
         if self.fixture is not None:
@@ -97,9 +107,7 @@ class KubernetesMCPClient:
                 for pod in self.fixture.pods
                 if namespace is None or pod.namespace == namespace
             ]
-        raise NotImplementedError(
-            "Kubernetes MCP transport will be implemented in the workflow phase"
-        )
+        self._raise_unavailable()
 
     async def get_pod(self, namespace: str, pod_name: str) -> dict[str, Any] | None:
         if self.fixture is not None:
@@ -107,9 +115,7 @@ class KubernetesMCPClient:
                 if pod.namespace == namespace and pod.name == pod_name:
                     return pod.model_dump(mode="json")
             return None
-        raise NotImplementedError(
-            "Kubernetes MCP transport will be implemented in the workflow phase"
-        )
+        self._raise_unavailable()
 
     async def get_pod_logs(
         self,
@@ -125,9 +131,7 @@ class KubernetesMCPClient:
                 if log.namespace == namespace and log.pod_name == pod_name and same_container:
                     return "\n".join(log.lines[-limit_lines:])
             return ""
-        raise NotImplementedError(
-            "Kubernetes MCP transport will be implemented in the workflow phase"
-        )
+        self._raise_unavailable()
 
     async def list_events(self, namespace: str) -> list[dict[str, Any]]:
         if self.fixture is not None:
@@ -136,9 +140,7 @@ class KubernetesMCPClient:
                 for event in self.fixture.events
                 if event.namespace == namespace
             ]
-        raise NotImplementedError(
-            "Kubernetes MCP transport will be implemented in the workflow phase"
-        )
+        self._raise_unavailable()
 
     async def get_events(self, namespace: str) -> list[dict[str, Any]]:
         return await self.list_events(namespace)
@@ -149,9 +151,7 @@ class KubernetesMCPClient:
             if item and item.namespace == namespace and item.name == deployment:
                 return item.model_dump(mode="json")
             return None
-        raise NotImplementedError(
-            "Kubernetes MCP transport will be implemented in the workflow phase"
-        )
+        self._raise_unavailable()
 
     async def get_rollout_status(
         self, namespace: str, deployment: str
@@ -161,9 +161,7 @@ class KubernetesMCPClient:
             if item and item.namespace == namespace and item.deployment == deployment:
                 return item.model_dump(mode="json")
             return None
-        raise NotImplementedError(
-            "Kubernetes MCP transport will be implemented in the workflow phase"
-        )
+        self._raise_unavailable()
 
     async def list_replicasets(
         self, namespace: str, deployment: str | None = None
@@ -175,9 +173,7 @@ class KubernetesMCPClient:
                 if replica_set.namespace == namespace
                 and (deployment is None or replica_set.deployment == deployment)
             ]
-        raise NotImplementedError(
-            "Kubernetes MCP transport will be implemented in the workflow phase"
-        )
+        self._raise_unavailable()
 
     async def collect_evidence(
         self,
@@ -326,4 +322,13 @@ class KubernetesMCPClient:
             item
             and (namespace is None or item.namespace == namespace)
             and (deployment is None or item.deployment == deployment)
+        )
+
+    def _raise_unavailable(self) -> None:
+        if self.transport == "disabled":
+            raise NotImplementedError("Kubernetes MCP transport is disabled")
+        if not self.endpoint_url:
+            raise NotImplementedError("Kubernetes MCP endpoint URL is not configured")
+        raise NotImplementedError(
+            "Live Kubernetes MCP read transport is configured but not implemented yet"
         )

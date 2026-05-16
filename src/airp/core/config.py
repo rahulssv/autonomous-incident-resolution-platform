@@ -1,3 +1,4 @@
+import json
 from functools import lru_cache
 from typing import Literal
 
@@ -39,6 +40,21 @@ class Settings(BaseSettings):
     llm_embedding_model: str = "embeddings"
     agent_read_only_evidence_enabled: bool = False
     rca_min_hypothesis_confidence: float = Field(default=0.4, ge=0.0, le=1.0)
+    kubernetes_mcp_transport: Literal["disabled", "mcp"] = "disabled"
+    kubernetes_mcp_url: AnyHttpUrl | None = None
+    kubernetes_mcp_namespace_allowlist: list[str] = Field(default_factory=list)
+    kubernetes_mcp_read_timeout_seconds: float = Field(default=20.0, gt=0.0)
+    github_mcp_transport: Literal["disabled", "mcp"] = "disabled"
+    github_mcp_url: AnyHttpUrl | None = None
+    github_mcp_repository_allowlist: list[str] = Field(
+        default_factory=lambda: ["AIRP-client/*"]
+    )
+    github_mcp_read_timeout_seconds: float = Field(default=20.0, gt=0.0)
+    dockerhub_base_url: AnyHttpUrl = "https://hub.docker.com/v2"
+    dockerhub_read_timeout_seconds: float = Field(default=20.0, gt=0.0)
+    mcp_read_retry_attempts: int = Field(default=2, ge=1, le=5)
+    mcp_read_retry_min_backoff_seconds: float = Field(default=0.1, ge=0.0)
+    mcp_read_retry_max_backoff_seconds: float = Field(default=1.0, ge=0.0)
     github_issue_creation_enabled: bool = False
     slack_notifications_enabled: bool = False
     remediation_pr_creation_enabled: bool = False
@@ -72,6 +88,31 @@ class Settings(BaseSettings):
         if not value.startswith("/"):
             return f"/{value}"
         return value.rstrip("/") or "/api"
+
+    @field_validator("kubernetes_mcp_url", "github_mcp_url", mode="before")
+    @classmethod
+    def empty_url_to_none(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
+
+    @field_validator(
+        "kubernetes_mcp_namespace_allowlist",
+        "github_mcp_repository_allowlist",
+        mode="before",
+    )
+    @classmethod
+    def normalize_allowlist(cls, value: object) -> object:
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                return json.loads(stripped)
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return value
 
     @property
     def entra_issuer(self) -> str | None:

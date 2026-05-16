@@ -40,7 +40,7 @@ spec:
 {{- end }}
           readinessProbe:
             httpGet:
-              path: /api/health
+              path: /api/readiness
               port: http
             initialDelaySeconds: 10
             periodSeconds: 10
@@ -54,4 +54,3 @@ spec:
 {{ toYaml .Values.resources | indent 12 }}
           securityContext:
 {{ toYaml .Values.securityContext | indent 12 }}
-

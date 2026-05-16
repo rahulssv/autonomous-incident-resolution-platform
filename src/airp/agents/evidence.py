@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from time import perf_counter
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from airp.core.allowlists import is_github_repository_allowed, is_namespace_allowed
 from airp.integrations.genaihub.redaction import redact_payload
+from airp.integrations.mcp_retry import is_timeout_error, read_with_retries
 
-ToolCallStatus = Literal["completed", "failed", "skipped", "unavailable"]
+ToolCallStatus = Literal["completed", "failed", "skipped", "unavailable", "forbidden", "timeout"]
 
 
 class PlannedToolCall(BaseModel):
@@ -41,10 +44,20 @@ class RCAEvidenceCollector:
         kubernetes_client: Any | None = None,
         github_client: Any | None = None,
         dockerhub_client: Any | None = None,
+        allowed_namespaces: Sequence[str] | None = None,
+        allowed_repositories: Sequence[str] | None = None,
+        retry_attempts: int = 2,
+        retry_min_backoff_seconds: float = 0.1,
+        retry_max_backoff_seconds: float = 1.0,
     ) -> None:
         self.kubernetes_client = kubernetes_client
         self.github_client = github_client
         self.dockerhub_client = dockerhub_client
+        self.allowed_namespaces = tuple(allowed_namespaces or ())
+        self.allowed_repositories = tuple(allowed_repositories or ())
+        self.retry_attempts = retry_attempts
+        self.retry_min_backoff_seconds = retry_min_backoff_seconds
+        self.retry_max_backoff_seconds = retry_max_backoff_seconds
 
     async def collect(self, state: dict[str, Any]) -> CollectedRCAEvidence:
         evidence = CollectedRCAEvidence()
@@ -113,14 +126,33 @@ class RCAEvidenceCollector:
                 )
             )
             return
+        if not is_namespace_allowed(namespace, self.allowed_namespaces):
+            evidence.tool_calls.append(
+                PlannedToolCall(
+                    tool_server="kubernetes_mcp",
+                    tool_name="collect_evidence",
+                    parameters=parameters,
+                    status="forbidden",
+                    error=(
+                        f"namespace '{namespace}' is outside the configured Kubernetes "
+                        "MCP allowlist"
+                    ),
+                )
+            )
+            return
 
         started = perf_counter()
         try:
-            bundle = await self.kubernetes_client.collect_evidence(
-                namespace=namespace,
-                pod_name=pod_name,
-                deployment=deployment,
-                container=container,
+            bundle = await read_with_retries(
+                lambda: self.kubernetes_client.collect_evidence(
+                    namespace=namespace,
+                    pod_name=pod_name,
+                    deployment=deployment,
+                    container=container,
+                ),
+                attempts=self.retry_attempts,
+                min_backoff_seconds=self.retry_min_backoff_seconds,
+                max_backoff_seconds=self.retry_max_backoff_seconds,
             )
         except NotImplementedError as exc:
             evidence.tool_calls.append(
@@ -135,12 +167,13 @@ class RCAEvidenceCollector:
             )
             return
         except Exception as exc:  # noqa: BLE001 - boundary must never crash RCA graph
+            status: ToolCallStatus = "timeout" if is_timeout_error(exc) else "failed"
             evidence.tool_calls.append(
                 self._tool_call(
                     "kubernetes_mcp",
                     "collect_evidence",
                     parameters,
-                    "failed",
+                    status,
                     started,
                     error=str(exc),
                 )
@@ -193,10 +226,29 @@ class RCAEvidenceCollector:
                 )
             )
             return
+        if not is_github_repository_allowed(repository_url, self.allowed_repositories):
+            evidence.tool_calls.append(
+                PlannedToolCall(
+                    tool_server="github_mcp",
+                    tool_name="collect_evidence",
+                    parameters=parameters,
+                    status="forbidden",
+                    error=(
+                        f"repository '{repository_url}' is outside the configured GitHub "
+                        "MCP allowlist"
+                    ),
+                )
+            )
+            return
 
         started = perf_counter()
         try:
-            bundle = await self.github_client.collect_evidence(repository_url=repository_url)
+            bundle = await read_with_retries(
+                lambda: self.github_client.collect_evidence(repository_url=repository_url),
+                attempts=self.retry_attempts,
+                min_backoff_seconds=self.retry_min_backoff_seconds,
+                max_backoff_seconds=self.retry_max_backoff_seconds,
+            )
         except NotImplementedError as exc:
             evidence.tool_calls.append(
                 self._tool_call(
@@ -210,12 +262,13 @@ class RCAEvidenceCollector:
             )
             return
         except Exception as exc:  # noqa: BLE001 - boundary must never crash RCA graph
+            status: ToolCallStatus = "timeout" if is_timeout_error(exc) else "failed"
             evidence.tool_calls.append(
                 self._tool_call(
                     "github_mcp",
                     "collect_evidence",
                     parameters,
-                    "failed",
+                    status,
                     started,
                     error=str(exc),
                 )
@@ -271,7 +324,12 @@ class RCAEvidenceCollector:
 
         started = perf_counter()
         try:
-            image_evidence = await self.dockerhub_client.get_image_evidence(image)
+            image_evidence = await read_with_retries(
+                lambda: self.dockerhub_client.get_image_evidence(image),
+                attempts=self.retry_attempts,
+                min_backoff_seconds=self.retry_min_backoff_seconds,
+                max_backoff_seconds=self.retry_max_backoff_seconds,
+            )
         except NotImplementedError as exc:
             evidence.tool_calls.append(
                 self._tool_call(
@@ -285,12 +343,13 @@ class RCAEvidenceCollector:
             )
             return
         except Exception as exc:  # noqa: BLE001 - boundary must never crash RCA graph
+            status: ToolCallStatus = "timeout" if is_timeout_error(exc) else "failed"
             evidence.tool_calls.append(
                 self._tool_call(
                     "dockerhub",
                     "get_image_evidence",
                     parameters,
-                    "failed",
+                    status,
                     started,
                     error=str(exc),
                 )

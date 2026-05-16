@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from airp.integrations.dockerhub.client import (
@@ -137,6 +138,35 @@ async def test_dockerhub_fixture_resolves_image_metadata() -> None:
     assert evidence.repository == "airpclient/checkout-api"
     assert evidence.tag == "v1"
     assert evidence.digest == "sha256:abc"
+
+
+@pytest.mark.asyncio
+async def test_dockerhub_live_tag_lookup_uses_http_transport_and_timeout() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v2/repositories/airpclient/checkout-api/tags/v1"
+        return httpx.Response(
+            200,
+            json={
+                "name": "v1",
+                "digest": "sha256:live",
+                "last_updated": "2026-05-16T10:00:00Z",
+                "images": [{"source_commit_sha": "abc123"}],
+            },
+        )
+
+    client = DockerHubClient(
+        base_url="https://hub.docker.com/v2",
+        timeout_seconds=3.0,
+        transport=httpx.MockTransport(handler),
+    )
+
+    evidence = await client.get_image_evidence("docker.io/airpclient/checkout-api:v1")
+
+    assert evidence.repository == "airpclient/checkout-api"
+    assert evidence.tag == "v1"
+    assert evidence.digest == "sha256:live"
+    assert evidence.source_commit_sha == "abc123"
+    assert evidence.last_updated == "2026-05-16T10:00:00Z"
 
 
 def test_parse_image_reference_handles_registry_tag_and_digest() -> None:

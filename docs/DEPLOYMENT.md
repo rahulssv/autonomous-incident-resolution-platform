@@ -74,7 +74,44 @@ AIRP_GATEWAY_API_KEY=<secret>
 
 Store `AIRP_GATEWAY_API_KEY` in Kubernetes Secret only.
 
-## 6. Database and Redis
+## 6. Configure Read-Only Evidence Integrations
+
+AIRP can collect RCA evidence from Kubernetes MCP, GitHub MCP, and public DockerHub
+metadata when read-only evidence is enabled.
+
+Runtime values:
+
+```text
+AIRP_AGENT_READ_ONLY_EVIDENCE_ENABLED=true
+AIRP_KUBERNETES_MCP_TRANSPORT=mcp
+AIRP_KUBERNETES_MCP_URL=https://<kubernetes-mcp-host>
+AIRP_KUBERNETES_MCP_NAMESPACE_ALLOWLIST=shopfast,payments,catalog
+AIRP_KUBERNETES_MCP_READ_TIMEOUT_SECONDS=20
+AIRP_GITHUB_MCP_TRANSPORT=mcp
+AIRP_GITHUB_MCP_URL=https://<github-mcp-host>
+AIRP_GITHUB_MCP_REPOSITORY_ALLOWLIST=AIRP-client/*
+AIRP_GITHUB_MCP_READ_TIMEOUT_SECONDS=20
+AIRP_DOCKERHUB_BASE_URL=https://hub.docker.com/v2
+AIRP_DOCKERHUB_READ_TIMEOUT_SECONDS=20
+AIRP_MCP_READ_RETRY_ATTEMPTS=2
+```
+
+Namespace allowlisting should include only AKS namespaces that run AIRP-client
+services. Repository allowlisting should remain scoped to `AIRP-client/*` unless a
+specific service repository needs a narrower allowlist such as
+`AIRP-client/checkout-api`.
+
+The current product only performs read-only evidence collection. GitHub issue
+creation, Slack sends, remediation PR creation, and documentation publishing remain
+disabled unless their explicit policy flags are enabled in a later governed rollout.
+
+Check the configuration surface after deployment:
+
+```bash
+curl http://localhost:8080/api/readiness
+```
+
+## 7. Database and Redis
 
 For production, use managed or cluster-hosted PostgreSQL with pgvector enabled and a production Redis instance.
 
@@ -84,7 +121,7 @@ Apply migrations:
 AIRP_DATABASE_URL=postgresql+asyncpg://<user>:<password>@<host>:5432/<db> alembic upgrade head
 ```
 
-## 7. Configure Temporal
+## 8. Configure Temporal
 
 Runtime values:
 
@@ -107,7 +144,7 @@ In production, deploy it as a separate worker Deployment using:
 python -m airp.workers.temporal_worker
 ```
 
-## 8. Helm Deploy
+## 9. Helm Deploy
 
 Create a production values file, for example `deploy/helm/airp/prod-values.yaml`:
 
@@ -124,6 +161,13 @@ env:
   AIRP_ENTRA_CLIENT_ID: <client-id>
   AIRP_KAFKA_BOOTSTRAP_SERVERS: <namespace>.servicebus.windows.net:9093
   AIRP_TEMPORAL_ADDRESS: <temporal-host>:7233
+  AIRP_AGENT_READ_ONLY_EVIDENCE_ENABLED: "true"
+  AIRP_KUBERNETES_MCP_TRANSPORT: mcp
+  AIRP_KUBERNETES_MCP_URL: https://<kubernetes-mcp-host>
+  AIRP_KUBERNETES_MCP_NAMESPACE_ALLOWLIST: shopfast,payments,catalog
+  AIRP_GITHUB_MCP_TRANSPORT: mcp
+  AIRP_GITHUB_MCP_URL: https://<github-mcp-host>
+  AIRP_GITHUB_MCP_REPOSITORY_ALLOWLIST: AIRP-client/*
 
 secretEnv:
   AIRP_GATEWAY_API_KEY: <secret>
@@ -146,6 +190,7 @@ kubectl -n airp rollout status deploy/airp-airp
 kubectl -n airp get pods
 kubectl -n airp port-forward svc/airp-airp 8080:80
 curl http://localhost:8080/api/health
+curl http://localhost:8080/api/readiness
 ```
 
 Run the alert consumer in the same environment:
@@ -174,11 +219,11 @@ python -m airp.workers.alert_consumer
 
 The Helm chart includes separate Deployments for the API, alert consumer, and Temporal worker. Disable workers in `values.yaml` only when running them outside the chart.
 
-## 9. Security Checklist
+## 10. Security Checklist
 
 - Keep Microsoft Entra ID auth enabled.
 - Store GenAI Hub, Event Hubs, GitHub, Slack, and database secrets in Kubernetes Secrets or external secret manager.
 - Do not expose `/docs` in production; the app disables docs when `AIRP_ENVIRONMENT=production`.
-- Use read-only Kubernetes MCP permissions for MVP.
-- Use least-privilege GitHub MCP permissions scoped to AIRP-client repositories.
+- Use read-only Kubernetes MCP permissions and an explicit AKS namespace allowlist for MVP.
+- Use least-privilege GitHub MCP permissions scoped to AIRP-client repositories and keep `AIRP_GITHUB_MCP_REPOSITORY_ALLOWLIST` scoped to `AIRP-client/*` or narrower.
 - Require human approval before repository write actions.

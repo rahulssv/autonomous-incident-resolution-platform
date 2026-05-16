@@ -28,3 +28,17 @@ class HealthResponse(BaseModel):
     service: str
     environment: str
     auth_enabled: bool
+
+
+class DependencyReadiness(BaseModel):
+    status: str
+    configured: bool
+    required: bool
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReadinessResponse(BaseModel):
+    status: str
+    service: str
+    environment: str
+    dependencies: dict[str, DependencyReadiness]

@@ -22,9 +22,27 @@ def build_default_agent_supervisor(settings: Settings | None = None) -> LangGrap
     evidence_collector = None
     if settings.agent_read_only_evidence_enabled:
         evidence_collector = RCAEvidenceCollector(
-            kubernetes_client=KubernetesMCPClient(),
-            github_client=GitHubMCPClient(),
-            dockerhub_client=DockerHubClient(),
+            kubernetes_client=KubernetesMCPClient(
+                transport=settings.kubernetes_mcp_transport,
+                endpoint_url=str(settings.kubernetes_mcp_url)
+                if settings.kubernetes_mcp_url
+                else None,
+                timeout_seconds=settings.kubernetes_mcp_read_timeout_seconds,
+            ),
+            github_client=GitHubMCPClient(
+                transport=settings.github_mcp_transport,
+                endpoint_url=str(settings.github_mcp_url) if settings.github_mcp_url else None,
+                timeout_seconds=settings.github_mcp_read_timeout_seconds,
+            ),
+            dockerhub_client=DockerHubClient(
+                base_url=str(settings.dockerhub_base_url),
+                timeout_seconds=settings.dockerhub_read_timeout_seconds,
+            ),
+            allowed_namespaces=settings.kubernetes_mcp_namespace_allowlist,
+            allowed_repositories=settings.github_mcp_repository_allowlist,
+            retry_attempts=settings.mcp_read_retry_attempts,
+            retry_min_backoff_seconds=settings.mcp_read_retry_min_backoff_seconds,
+            retry_max_backoff_seconds=settings.mcp_read_retry_max_backoff_seconds,
         )
 
     return LangGraphSupervisor(

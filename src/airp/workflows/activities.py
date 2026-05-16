@@ -135,6 +135,22 @@ async def _persist_rca_outputs(
             latency_ms=tool_call.get("latency_ms"),
             error=tool_call.get("error"),
         )
+        event_type = _tool_call_event_type(tool_call)
+        if event_type:
+            await service.add_event(
+                incident_id,
+                IncidentEventCreate(
+                    event_type=event_type,
+                    producer="langgraph.rca",
+                    payload={
+                        "tool_server": tool_call.get("tool_server"),
+                        "tool_name": tool_call.get("tool_name"),
+                        "status": tool_call.get("status"),
+                        "result_summary": tool_call.get("result_summary"),
+                        "error": tool_call.get("error"),
+                    },
+                ),
+            )
 
     for model_call in state.get("model_calls", []):
         await service.add_model_call(
@@ -321,6 +337,13 @@ def _unique_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]
         seen.add(key)
         unique.append(tool_call)
     return unique
+
+
+def _tool_call_event_type(tool_call: dict[str, Any]) -> str | None:
+    status = tool_call.get("status")
+    if status in {"unavailable", "forbidden", "timeout"}:
+        return f"rca.evidence_collection.{status}"
+    return None
 
 
 def _supporting_evidence_payload(

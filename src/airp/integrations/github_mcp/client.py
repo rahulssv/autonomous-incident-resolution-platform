@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -69,8 +69,18 @@ class GitHubEvidenceBundle(BaseModel):
 class GitHubMCPClient:
     """Thin boundary for future MCP transport implementation."""
 
-    def __init__(self, fixture: GitHubEvidenceBundle | dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        fixture: GitHubEvidenceBundle | dict[str, Any] | None = None,
+        *,
+        transport: Literal["disabled", "mcp"] = "disabled",
+        endpoint_url: str | None = None,
+        timeout_seconds: float = 20.0,
+    ) -> None:
         self.fixture = GitHubEvidenceBundle.model_validate(fixture) if fixture else None
+        self.transport = transport
+        self.endpoint_url = endpoint_url.rstrip("/") if endpoint_url else None
+        self.timeout_seconds = timeout_seconds
 
     async def list_org_repositories(self, org: str) -> list[dict[str, Any]]:
         if self.fixture and self.fixture.repository_url:
@@ -85,7 +95,7 @@ class GitHubMCPClient:
                     }
                 ]
             return []
-        raise NotImplementedError("GitHub MCP transport will be implemented in the workflow phase")
+        self._raise_unavailable()
 
     async def get_repository(self, repository_url: str) -> dict[str, Any] | None:
         if self.fixture is not None:
@@ -98,7 +108,7 @@ class GitHubMCPClient:
                 "html_url": repository_url,
                 "default_branch": self.fixture.default_branch,
             }
-        raise NotImplementedError("GitHub MCP transport will be implemented in the workflow phase")
+        self._raise_unavailable()
 
     async def lookup_commits(
         self,
@@ -116,7 +126,7 @@ class GitHubMCPClient:
                 commit.model_dump(mode="json")
                 for commit in self.fixture.commits[:limit]
             ]
-        raise NotImplementedError("GitHub MCP transport will be implemented in the workflow phase")
+        self._raise_unavailable()
 
     async def lookup_merged_prs(
         self,
@@ -134,7 +144,7 @@ class GitHubMCPClient:
                 pull_request.model_dump(mode="json")
                 for pull_request in self.fixture.merged_prs[:limit]
             ]
-        raise NotImplementedError("GitHub MCP transport will be implemented in the workflow phase")
+        self._raise_unavailable()
 
     async def lookup_changed_files(
         self,
@@ -153,7 +163,7 @@ class GitHubMCPClient:
                 changed_file.model_dump(mode="json")
                 for changed_file in self._all_changed_files()[:limit]
             ]
-        raise NotImplementedError("GitHub MCP transport will be implemented in the workflow phase")
+        self._raise_unavailable()
 
     async def lookup_releases(
         self,
@@ -168,7 +178,7 @@ class GitHubMCPClient:
                 release.model_dump(mode="json")
                 for release in self.fixture.releases[:limit]
             ]
-        raise NotImplementedError("GitHub MCP transport will be implemented in the workflow phase")
+        self._raise_unavailable()
 
     async def lookup_prior_issues(
         self,
@@ -185,7 +195,7 @@ class GitHubMCPClient:
                 issue.model_dump(mode="json")
                 for issue in self.fixture.prior_issues[:limit]
             ]
-        raise NotImplementedError("GitHub MCP transport will be implemented in the workflow phase")
+        self._raise_unavailable()
 
     async def lookup_issue_by_idempotency_marker(
         self, repository_url: str, marker: str
@@ -285,6 +295,15 @@ class GitHubMCPClient:
             seen.add(key)
             deduped.append(changed_file)
         return deduped
+
+    def _raise_unavailable(self) -> None:
+        if self.transport == "disabled":
+            raise NotImplementedError("GitHub MCP transport is disabled")
+        if not self.endpoint_url:
+            raise NotImplementedError("GitHub MCP endpoint URL is not configured")
+        raise NotImplementedError(
+            "Live GitHub MCP read transport is configured but not implemented yet"
+        )
 
 
 def _repository_owner_name(repository_url: str) -> tuple[str | None, str | None]:
