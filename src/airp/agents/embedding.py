@@ -44,10 +44,19 @@ class EmbeddingAgent:
             )
             return self._state_update(state, run, redacted_texts, [])
 
-        vectors = self.embedder.embed(
-            input_text=redacted_texts,
-            model=self.settings.llm_embedding_model,
-        )
+        try:
+            vectors = self.embedder.embed(
+                input_text=redacted_texts,
+                model=self.settings.llm_embedding_model,
+            )
+        except Exception as exc:  # noqa: BLE001 - embedding must not fail incident persistence
+            run = EmbeddingRun(
+                embedded_text_count=len(redacted_texts),
+                vector_count=0,
+                skipped=True,
+                reason=f"Embedding generation failed: {exc}",
+            )
+            return self._state_update(state, run, redacted_texts, [])
         run = EmbeddingRun(
             embedded_text_count=len(redacted_texts),
             vector_count=len(vectors),

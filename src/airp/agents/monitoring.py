@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
-from pydantic import ValidationError
-
 from airp.agents.state import AgentEvent, AgentGraphState, MonitoringAssessment
 from airp.core.config import Settings, get_settings
 from airp.domain.enums import IncidentSeverity
@@ -58,10 +56,10 @@ class MonitoringAgent:
                     temperature=0.0,
                     request_id=state.get("correlation_id") or state.get("incident_id"),
                 )
-            except (ValidationError, json.JSONDecodeError, ValueError):
+            except Exception as exc:  # noqa: BLE001 - monitoring must degrade gracefully
                 return self._deterministic_assessment(
                     state,
-                    reason="LLM monitoring output did not match the required schema.",
+                    reason=f"Structured monitoring assessment failed: {exc}",
                 )
         return self._deterministic_assessment(state)
 
