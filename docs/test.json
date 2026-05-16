@@ -8,8 +8,8 @@
             "configured": true,
             "required": true,
             "details": {
-                "check_mode": "configuration_only",
-                "reachability": "not_checked"
+                "check_mode": "active",
+                "reachability": "reachable"
             }
         },
         "redis": {
@@ -17,8 +17,8 @@
             "configured": true,
             "required": true,
             "details": {
-                "check_mode": "configuration_only",
-                "reachability": "not_checked"
+                "check_mode": "active",
+                "reachability": "reachable"
             }
         },
         "temporal": {
@@ -28,8 +28,8 @@
             "details": {
                 "namespace": "default",
                 "task_queue": "airp-incident-workflows",
-                "check_mode": "configuration_only",
-                "reachability": "not_checked"
+                "check_mode": "active",
+                "reachability": "reachable"
             }
         },
         "event_hubs": {
@@ -39,8 +39,8 @@
             "details": {
                 "alerts_raw_topic": "airp.alerts.raw",
                 "deadletter_topic": "airp.deadletter",
-                "check_mode": "configuration_only",
-                "reachability": "not_checked"
+                "check_mode": "active",
+                "reachability": "reachable"
             }
         },
         "genaihub": {
@@ -49,8 +49,8 @@
             "required": true,
             "details": {
                 "base_url": "https://hub-proxy-service.thankfulfield-16b4d5d6.eastus.azurecontainerapps.io/",
-                "check_mode": "configuration_only",
-                "reachability": "not_checked"
+                "check_mode": "active",
+                "reachability": "reachable"
             }
         },
         "kubernetes_mcp": {
@@ -67,8 +67,8 @@
                     "catalog"
                 ],
                 "warning": null,
-                "check_mode": "configuration_only",
-                "reachability": "not_checked"
+                "check_mode": "active",
+                "reachability": "reachable"
             }
         },
         "github_mcp": {
@@ -83,8 +83,8 @@
                     "AIRP-client/*"
                 ],
                 "warning": null,
-                "check_mode": "configuration_only",
-                "reachability": "not_checked"
+                "check_mode": "active",
+                "reachability": "reachable"
             }
         },
         "dockerhub": {
@@ -94,8 +94,8 @@
             "details": {
                 "base_url": "https://hub.docker.com/v2",
                 "timeout_seconds": 20.0,
-                "check_mode": "configuration_only",
-                "reachability": "not_checked"
+                "check_mode": "active",
+                "reachability": "reachable"
             }
         }
     }

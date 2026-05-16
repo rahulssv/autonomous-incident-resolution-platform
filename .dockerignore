@@ -7,6 +7,6 @@ __pycache__
 .env
 .env.*
 !.env.example
+*.pem
 genaihub_startercode-main
 tests
-
