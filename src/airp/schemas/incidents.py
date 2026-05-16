@@ -242,6 +242,28 @@ class DocumentationReportRead(TimestampedRead):
     )
 
 
+class GitHubArtifactRead(TimestampedRead):
+    incident_id: str
+    artifact_type: str
+    repository_url: str
+    artifact_url: str
+    external_id: str | None = None
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias="extra",
+        serialization_alias="metadata",
+    )
+
+
+class SlackMessageRead(TimestampedRead):
+    incident_id: str
+    channel: str
+    message_ts: str | None = None
+    thread_ts: str | None = None
+    message_url: str | None = None
+    payload: dict[str, Any]
+
+
 class IncidentEmbeddingCreate(BaseModel):
     embedding_type: str = Field(min_length=1, max_length=120)
     text: str = Field(min_length=1)

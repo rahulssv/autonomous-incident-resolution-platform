@@ -3,7 +3,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,12 +11,14 @@ from airp.core.errors import NotFoundError
 from airp.db.models.incident import (
     DocumentationReport,
     EvidenceItem,
+    GitHubArtifact,
     Incident,
     IncidentEmbedding,
     IncidentEvent,
     ModelCall,
     RCAHypothesis,
     RemediationPlan,
+    SlackMessage,
     ToolCall,
 )
 from airp.domain.enums import IncidentStatus
@@ -207,6 +209,10 @@ class IncidentService:
         )
         return list((await self.session.scalars(stmt)).all())
 
+    async def count_evidence(self, incident_id: str) -> int:
+        await self.get_incident(incident_id)
+        return await self._count_for_incident(EvidenceItem, incident_id)
+
     async def add_tool_call(
         self,
         incident_id: str,
@@ -246,6 +252,10 @@ class IncidentService:
         )
         return list((await self.session.scalars(stmt)).all())
 
+    async def count_tool_calls(self, incident_id: str) -> int:
+        await self.get_incident(incident_id)
+        return await self._count_for_incident(ToolCall, incident_id)
+
     async def add_rca_hypothesis(
         self, incident_id: str, payload: RCAHypothesisCreate
     ) -> RCAHypothesis:
@@ -272,6 +282,10 @@ class IncidentService:
         )
         return list((await self.session.scalars(stmt)).all())
 
+    async def count_rca_hypotheses(self, incident_id: str) -> int:
+        await self.get_incident(incident_id)
+        return await self._count_for_incident(RCAHypothesis, incident_id)
+
     async def add_model_call(self, incident_id: str, payload: ModelCallCreate) -> ModelCall:
         await self.get_incident(incident_id)
         model_call = ModelCall(
@@ -295,6 +309,10 @@ class IncidentService:
             .offset(offset)
         )
         return list((await self.session.scalars(stmt)).all())
+
+    async def count_model_calls(self, incident_id: str) -> int:
+        await self.get_incident(incident_id)
+        return await self._count_for_incident(ModelCall, incident_id)
 
     async def create_remediation_plan(
         self,
@@ -323,6 +341,10 @@ class IncidentService:
         )
         return list((await self.session.scalars(stmt)).all())
 
+    async def count_remediation_plans(self, incident_id: str) -> int:
+        await self.get_incident(incident_id)
+        return await self._count_for_incident(RemediationPlan, incident_id)
+
     async def create_documentation_report(
         self,
         incident_id: str,
@@ -348,6 +370,44 @@ class IncidentService:
             .offset(offset)
         )
         return list((await self.session.scalars(stmt)).all())
+
+    async def count_documentation_reports(self, incident_id: str) -> int:
+        await self.get_incident(incident_id)
+        return await self._count_for_incident(DocumentationReport, incident_id)
+
+    async def list_github_artifacts(
+        self, incident_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[GitHubArtifact]:
+        await self.get_incident(incident_id)
+        stmt = (
+            select(GitHubArtifact)
+            .where(GitHubArtifact.incident_id == incident_id)
+            .order_by(GitHubArtifact.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self.session.scalars(stmt)).all())
+
+    async def count_github_artifacts(self, incident_id: str) -> int:
+        await self.get_incident(incident_id)
+        return await self._count_for_incident(GitHubArtifact, incident_id)
+
+    async def list_slack_messages(
+        self, incident_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[SlackMessage]:
+        await self.get_incident(incident_id)
+        stmt = (
+            select(SlackMessage)
+            .where(SlackMessage.incident_id == incident_id)
+            .order_by(SlackMessage.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self.session.scalars(stmt)).all())
+
+    async def count_slack_messages(self, incident_id: str) -> int:
+        await self.get_incident(incident_id)
+        return await self._count_for_incident(SlackMessage, incident_id)
 
     async def create_incident_embedding(
         self,
@@ -376,6 +436,14 @@ class IncidentService:
             .offset(offset)
         )
         return list((await self.session.scalars(stmt)).all())
+
+    async def count_incident_embeddings(self, incident_id: str) -> int:
+        await self.get_incident(incident_id)
+        return await self._count_for_incident(IncidentEmbedding, incident_id)
+
+    async def _count_for_incident(self, model, incident_id: str) -> int:
+        stmt = select(func.count()).select_from(model).where(model.incident_id == incident_id)
+        return int(await self.session.scalar(stmt) or 0)
 
 
 def _stable_hash(value: Any) -> str:

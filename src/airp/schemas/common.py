@@ -8,8 +8,8 @@ class APIMessage(BaseModel):
     message: str
 
 
-class Page(BaseModel):
-    items: list[Any]
+class Page[T](BaseModel):
+    items: list[T]
     total: int
     limit: int = Field(ge=1, le=500)
     offset: int = Field(ge=0)

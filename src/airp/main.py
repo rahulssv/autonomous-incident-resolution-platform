@@ -5,6 +5,11 @@ from airp.api.router import api_router
 from airp.core.config import get_settings
 from airp.core.errors import register_error_handlers
 from airp.core.logging import configure_logging
+from airp.core.middleware import (
+    CORRELATION_ID_HEADER,
+    REQUEST_ID_HEADER,
+    RequestCorrelationIdMiddleware,
+)
 
 
 def create_app() -> FastAPI:
@@ -18,6 +23,7 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if settings.environment != "production" else None,
         openapi_url="/openapi.json" if settings.environment != "production" else None,
     )
+    app.add_middleware(RequestCorrelationIdMiddleware)
 
     if settings.allowed_origins:
         app.add_middleware(
@@ -25,7 +31,13 @@ def create_app() -> FastAPI:
             allow_origins=settings.allowed_origins,
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=["Authorization", "Content-Type"],
+            allow_headers=[
+                "Authorization",
+                "Content-Type",
+                REQUEST_ID_HEADER,
+                CORRELATION_ID_HEADER,
+            ],
+            expose_headers=[REQUEST_ID_HEADER, CORRELATION_ID_HEADER],
         )
 
     register_error_handlers(app)

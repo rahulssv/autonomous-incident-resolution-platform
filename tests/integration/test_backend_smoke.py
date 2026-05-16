@@ -1,11 +1,24 @@
+import asyncio
+
+from airp.core.middleware import CORRELATION_ID_HEADER, REQUEST_ID_HEADER
 from airp.domain.enums import IncidentStatus
 from airp.main import create_app
 from airp.schemas.catalog import ServiceCreate
+from airp.schemas.common import Page
 from airp.schemas.incidents import (
     DocumentationReportCreate,
+    DocumentationReportRead,
+    EvidenceItemRead,
+    GitHubArtifactRead,
     IncidentCreate,
     IncidentEmbeddingCreate,
+    IncidentEmbeddingRead,
     IncidentSignal,
+    ModelCallRead,
+    RCAHypothesisRead,
+    RemediationPlanRead,
+    SlackMessageRead,
+    ToolCallRead,
 )
 
 
@@ -24,10 +37,49 @@ def test_app_registers_expected_routes() -> None:
     assert "/api/incidents/{incident_id}/embeddings" in paths
     assert "/api/incidents/{incident_id}/remediation-plans" in paths
     assert "/api/incidents/{incident_id}/documentation-reports" in paths
+    assert "/api/incidents/{incident_id}/github-artifacts" in paths
+    assert "/api/incidents/{incident_id}/slack-messages" in paths
     assert "/api/services" in paths
     assert "/api/repositories" in paths
     assert "/api/workloads" in paths
     assert "/api/search/incidents" in paths
+
+
+def test_request_and_correlation_headers_are_returned() -> None:
+    response_headers = asyncio.run(
+        _call_asgi_get(
+            "/",
+            headers={
+                REQUEST_ID_HEADER: "req-test-123",
+                CORRELATION_ID_HEADER: "corr-test-456",
+            },
+        )
+    )
+
+    assert response_headers[REQUEST_ID_HEADER.lower()] == "req-test-123"
+    assert response_headers[CORRELATION_ID_HEADER.lower()] == "corr-test-456"
+
+
+def test_incident_artifact_routes_use_paginated_response_models() -> None:
+    app = create_app()
+
+    expected_response_models = {
+        "/api/incidents/{incident_id}/evidence": Page[EvidenceItemRead],
+        "/api/incidents/{incident_id}/tool-calls": Page[ToolCallRead],
+        "/api/incidents/{incident_id}/hypotheses": Page[RCAHypothesisRead],
+        "/api/incidents/{incident_id}/model-calls": Page[ModelCallRead],
+        "/api/incidents/{incident_id}/embeddings": Page[IncidentEmbeddingRead],
+        "/api/incidents/{incident_id}/remediation-plans": Page[RemediationPlanRead],
+        "/api/incidents/{incident_id}/documentation-reports": Page[DocumentationReportRead],
+        "/api/incidents/{incident_id}/github-artifacts": Page[GitHubArtifactRead],
+        "/api/incidents/{incident_id}/slack-messages": Page[SlackMessageRead],
+    }
+    get_routes = {
+        route.path: route for route in app.routes if "GET" in getattr(route, "methods", set())
+    }
+
+    for path, response_model in expected_response_models.items():
+        assert get_routes[path].response_model == response_model
 
 
 def test_service_schema_normalizes_client_mapping_fields() -> None:
@@ -102,3 +154,40 @@ def test_incident_embedding_schema_accepts_json_backed_vectors() -> None:
 
     assert payload["embedding_type"] == "langgraph.graph_text"
     assert payload["vector"] == [0.1, 0.2, 0.3]
+
+
+async def _call_asgi_get(path: str, *, headers: dict[str, str]) -> dict[str, str]:
+    app = create_app()
+    response_headers: dict[str, str] = {}
+    request_sent = False
+    raw_headers = [(name.lower().encode(), value.encode()) for name, value in headers.items()]
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": raw_headers,
+        "client": ("testclient", 0),
+        "server": ("testserver", 80),
+        "state": {},
+    }
+
+    async def receive() -> dict[str, object]:
+        nonlocal request_sent
+        if not request_sent:
+            request_sent = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await asyncio.sleep(0)
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict[str, object]) -> None:
+        if message["type"] == "http.response.start":
+            for name, value in message["headers"]:
+                response_headers[name.decode()] = value.decode()
+
+    await asyncio.wait_for(app(scope, receive, send), timeout=5)
+    return response_headers

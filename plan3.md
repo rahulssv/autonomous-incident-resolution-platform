@@ -13,7 +13,7 @@ Already implemented:
 - SQLAlchemy async models for catalog, repositories, workloads, incidents, events, evidence, approvals, remediation plans, model calls, tool calls, GitHub artifacts, Slack messages, and embeddings.
 - SQLAlchemy async model and migration for internal documentation report drafts.
 - Alembic initial schema plus incident idempotency migration.
-- REST APIs for health, incidents, timelines, audit, services, repositories, workloads, approvals, remediation plan creation/listing, documentation report draft listing, and search.
+- REST APIs for health, incidents, timelines, audit, services, repositories, workloads, approvals, remediation plan creation/listing, documentation report draft listing, GitHub artifact listing, Slack message listing, and search.
 - GenAI Hub adapter with OpenAI-compatible chat, structured chat, embeddings, redaction, retries, and model routing settings.
 - Integration boundaries for GitHub MCP, Kubernetes MCP, Slack, and DockerHub.
 - Azure Event Hubs Kafka-compatible configuration and JSON event publishing.
@@ -32,8 +32,10 @@ Already implemented:
 - Temporal `agent_graph_run` persistence for RCA hypotheses and GenAI model-call audit records.
 - RCA safety hardening for unsupported claims, low-confidence escalation, prompt-injection text in evidence, and scenario fixtures.
 - Read APIs for incident evidence, tool calls, model calls, and RCA hypotheses.
-- Read APIs for remediation plans and documentation report drafts.
+- Read APIs for remediation plans, documentation report drafts, GitHub artifacts, and Slack messages.
 - Read API for persisted incident graph embeddings with safe vector metadata.
+- Request/correlation ID middleware with response headers and CORS exposure.
+- Generic paginated response schema and total-count pagination for incident artifact read APIs: evidence, tool calls, RCA hypotheses, model calls, remediation plans, documentation reports, embeddings, GitHub artifacts, and Slack messages.
 - Disabled-by-default external action policy flags and shared artifact idempotency helper for future GitHub, Slack, PR, and documentation writes.
 - Remediation Agent LangGraph node with typed output, prompt, deterministic fallback, policy grounding, and internal remediation-plan persistence.
 - Documentation Agent LangGraph node with typed report-draft output, prompt, deterministic fallback, and publishing disabled by policy.
@@ -78,7 +80,7 @@ Verified from the current repository on 2026-05-16:
 - Current Temporal workflow invokes a LangGraph supervisor through the `agent_graph_run` activity and persists RCA artifacts, proposed remediation plans, and documentation report drafts.
 - Current graph embedding output is persisted to `incident_embeddings`; pgvector conversion and semantic ranking remain pending.
 - Current GenAI Hub integration is used as an optional LLM/embedding adapter; RCA, Remediation, and Documentation prompt/model-call paths are implemented, while shared prompt loading and production evals are still pending.
-- Current verification baseline is `./scripts/verify.sh` with 70 passing tests.
+- Current verification baseline is `./scripts/verify.sh` with 72 passing tests.
 
 ## Remaining Work Summary
 
@@ -96,7 +98,7 @@ The remaining product work is:
 - GenAI Hub production agent controls beyond the RCA prompt: shared prompt loading, model fallback policy, token/cost tracking, groundedness rules, prompt-injection hardening, and eval fixtures.
 - Incident memory: persisted graph embeddings, pgvector-backed embeddings, semantic search, background embedding jobs, ranking tests, and secret-safe embedding policy.
 - End-to-end RCA, remediation, documentation, and knowledge-loop behavior.
-- API completion for incident embeddings, GitHub artifacts, Slack messages, audit export, policy management, refresh, and republish flows.
+- API completion for workflow state, audit export, policy management, refresh, republish, and remaining paginated list flows.
 - Observability, security hardening, CI/CD, AKS production deployment, end-to-end simulations, resilience testing, and handoff documentation.
 
 ## Product Guardrails
@@ -136,14 +138,14 @@ Tasks:
 - [ ] Confirm embedding dimensions returned by GenAI Hub `embeddings`.
 - [ ] Convert `incident_embeddings.vector` from JSON to `pgvector.Vector`.
 - [ ] Add repository-layer classes for incident, catalog, approval, evidence, model-call, tool-call, GitHub artifact, and Slack message queries.
-- [ ] Add pagination response shape: `items`, `limit`, `offset`, `total`.
+- [x] Add pagination response shape: `items`, `limit`, `offset`, `total`.
 - [ ] Update list APIs to return paginated responses.
 - [ ] Add update endpoints for services, repositories, workloads, incidents, remediation plans, and approvals where appropriate.
 - [ ] Add archive semantics for service catalog, repositories, workloads, and stale records.
 - [ ] Add database check constraints for incident status, severity, remediation status, risk level, and approval decision.
 - [ ] Add optimistic concurrency checks for approval-sensitive writes.
-- [ ] Add request ID and correlation ID middleware.
-- [ ] Return request/correlation IDs in every API response.
+- [x] Add request ID and correlation ID middleware.
+- [x] Return request/correlation IDs in every API response.
 - [ ] Add structured audit event creation to every mutating API route.
 - [ ] Add OpenAPI examples for key request and response models.
 - [ ] Add PostgreSQL integration test profile using Docker Compose.
@@ -621,8 +623,8 @@ Tasks:
 - [x] Add evidence listing endpoint.
 - [x] Add RCA hypothesis listing endpoint.
 - [x] Add readiness endpoint for Kubernetes MCP, GitHub MCP, and DockerHub configuration.
-- [ ] Add GitHub artifact listing endpoint.
-- [ ] Add Slack message listing endpoint.
+- [x] Add GitHub artifact listing endpoint.
+- [x] Add Slack message listing endpoint.
 - [x] Add model call listing endpoint with safe prompt/response hashes only.
 - [x] Add tool call listing endpoint.
 - [x] Add incident audit event listing endpoint.
@@ -904,7 +906,8 @@ Highest-priority remaining engineering tasks:
 - [ ] Add vector-backed semantic search and ranking tests.
 - [x] Add API endpoints for remediation plan listing and documentation report listing.
 - [x] Add API endpoint for incident embeddings.
-- [ ] Add API endpoints for GitHub artifacts, Slack messages, audit export, policy management, discovery refresh, and report republish.
+- [x] Add API endpoints for GitHub artifacts and Slack messages.
+- [ ] Add API endpoints for audit export, policy management, discovery refresh, and report republish.
 - [ ] Add CI/CD workflows for lint, tests, migrations, Docker build, image scanning, SBOM, Helm checks, release, deployment, and rollback.
 - [ ] Deploy and validate AIRP API, alert consumer, and Temporal worker on Azure AKS with Kubernetes secrets and production auth.
 - [ ] Run end-to-end simulations for latency, crash loop, bad config, and failed deployment incidents.
@@ -923,10 +926,11 @@ Foundation and data:
 - [x] Add incident embedding create/read schemas and service methods over the existing JSON-backed `incident_embeddings` table.
 - [ ] Add repository-layer query classes for incidents, catalog, approvals, evidence, model calls, tool calls, GitHub artifacts, and Slack messages.
 - [ ] Add repository-layer query classes for remediation plans, documentation reports, and incident embeddings.
-- [ ] Add total-count pagination response models and update list APIs.
+- [x] Add total-count pagination response models for incident artifact read APIs.
+- [ ] Extend paginated responses to remaining catalog, incident, search, workflow, and future artifact list APIs where appropriate.
 - [ ] Add update/archive semantics for catalog, repositories, workloads, incidents, remediation plans, and approvals where appropriate.
 - [ ] Add database check constraints and optimistic concurrency for approval-sensitive writes.
-- [ ] Add request ID and correlation ID middleware with response headers.
+- [x] Add request ID and correlation ID middleware with response headers.
 - [ ] Add structured audit events for every mutating API route.
 
 Authentication and authorization:
@@ -1005,7 +1009,7 @@ API completion:
 - [x] Add remediation plan listing endpoint.
 - [x] Add documentation report listing endpoint.
 - [x] Add incident embedding listing endpoint.
-- [ ] Add GitHub artifact and Slack message listing endpoints.
+- [x] Add GitHub artifact and Slack message listing endpoints.
 - [ ] Add audit export endpoint.
 - [ ] Add Admin policy management endpoint.
 - [ ] Add discovery refresh and documentation republish endpoints.
@@ -1209,18 +1213,56 @@ Verification:
 - Focused tests for agent persistence and backend smoke pass with 7 tests.
 - `./scripts/verify.sh` passes with 70 tests.
 
-## Immediate Next Sprint
+## Completed Sprint: Request IDs and Paginated Artifact Responses
 
-Sprint goal: harden core API ergonomics with request/correlation ID middleware and paginated read responses while keeping existing endpoint compatibility in mind.
+Sprint goal: harden core API ergonomics with request/correlation ID middleware and paginated incident artifact read responses.
 
 Tasks:
 
-1. [ ] Add request ID and correlation ID middleware with response headers.
-2. [ ] Add reusable paginated response schemas for incident artifact list endpoints.
-3. [ ] Add total-count query helpers for incident evidence, tool calls, model calls, hypotheses, remediation plans, documentation reports, and embeddings.
-4. [ ] Update list APIs to support `items`, `limit`, `offset`, and `total` responses without breaking current tests.
-5. [ ] Add tests for request/correlation ID propagation and pagination metadata.
-6. [ ] Update OpenAPI examples for the newly paginated incident artifact endpoints.
+1. [x] Add request ID and correlation ID middleware with response headers.
+2. [x] Add reusable generic `Page[T]` response schema for incident artifact list endpoints.
+3. [x] Add total-count query helpers for incident evidence, tool calls, model calls, hypotheses, remediation plans, documentation reports, and embeddings.
+4. [x] Update incident artifact list APIs to return `items`, `limit`, `offset`, and `total`.
+5. [x] Add tests for request/correlation ID propagation and paginated artifact response models.
+6. [x] Add OpenAPI examples for the newly paginated incident artifact endpoints.
+
+Verification:
+
+- Focused `ruff check` for touched API, middleware, schema, service, and smoke-test files passes.
+- `pytest tests/integration/test_backend_smoke.py -q` passes with 7 tests.
+- `./scripts/verify.sh` passes with 72 tests.
+
+## Completed Sprint: GitHub and Slack Artifact Read APIs
+
+Sprint goal: expose remaining persisted external-artifact records through backend APIs without enabling new GitHub or Slack writes.
+
+Tasks:
+
+1. [x] Add read schemas for persisted GitHub artifacts and Slack messages.
+2. [x] Add service list/count helpers for `github_artifacts` and `slack_messages`.
+3. [x] Add `GET /api/incidents/{incident_id}/github-artifacts` with paginated response metadata.
+4. [x] Add `GET /api/incidents/{incident_id}/slack-messages` with paginated response metadata.
+5. [x] Add smoke tests for route registration and response models.
+6. [x] Keep issue creation, Slack sends, branch creation, PR creation, and documentation publishing disabled until approval/policy gates are complete.
+
+Verification:
+
+- Focused `ruff check` for touched API, schema, service, and smoke-test files passes.
+- `pytest tests/integration/test_backend_smoke.py -q` passes with 7 tests.
+- `./scripts/verify.sh` passes with 72 tests.
+
+## Immediate Next Sprint
+
+Sprint goal: add workflow visibility and operator export surfaces without changing incident execution behavior.
+
+Tasks:
+
+1. [ ] Add `GET /api/incidents/{incident_id}/workflow/state` for current workflow ID, run ID, incident status, and latest workflow-related timeline event.
+2. [ ] Add a retry-failed-activity workflow signal contract without invoking retries until Temporal support is complete.
+3. [ ] Add audit export endpoint for incident events with JSON response first.
+4. [ ] Add tests for workflow-state route registration, response schema, and audit export shape.
+5. [ ] Update OpenAPI examples for workflow state and audit export.
+6. [ ] Keep workflow execution, retry activity behavior, and external writes unchanged until workflow hardening is complete.
 
 ## Verified Remaining Critical Path
 
@@ -1230,8 +1272,8 @@ Verified from the repository on 2026-05-16:
 2. Governance: wire the existing feature flags, idempotency helper, repository allowlists, and namespace allowlists into future write paths, then add approval policy and blocked-path policy before any GitHub or Slack writes.
 3. Agent completion: extend the Remediation and Documentation nodes with approval workflow states, final artifact enrichment, and governed external writes.
 4. Memory: add pgvector migration, confirm embedding dimensions, and switch incident search to vector-backed ranking when query text is present.
-5. APIs: add paginated artifact responses, GitHub artifact, Slack message, audit export, policy, discovery refresh, workflow-state, and documentation republish endpoints.
-6. Operations: add metrics, health/readiness checks, request/correlation ID middleware, structured logging, CI/CD workflows, scans, SBOM, and AKS production validation.
+5. APIs: add audit export, policy, discovery refresh, workflow-state, documentation republish, and remaining paginated list endpoints.
+6. Operations: add metrics, health/readiness checks, structured logging with request/correlation IDs, CI/CD workflows, scans, SBOM, and AKS production validation.
 
 ## Production-Ready Definition
 

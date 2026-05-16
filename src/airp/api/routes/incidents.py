@@ -5,10 +5,12 @@ from typing import Annotated
 from fastapi import APIRouter, Query, status
 
 from airp.api.deps import CurrentPrincipal, DbSession
+from airp.schemas.common import Page
 from airp.schemas.incidents import (
     DocumentationReportRead,
     EvidenceItemCreate,
     EvidenceItemRead,
+    GitHubArtifactRead,
     IncidentCreate,
     IncidentEmbeddingRead,
     IncidentEventCreate,
@@ -20,6 +22,7 @@ from airp.schemas.incidents import (
     RCAHypothesisRead,
     RemediationPlanCreate,
     RemediationPlanRead,
+    SlackMessageRead,
     ToolCallRead,
     WorkflowSignalRequest,
 )
@@ -27,6 +30,22 @@ from airp.services.incident_service import IncidentService
 from airp.services.workflow_service import IncidentWorkflowSignalService
 
 router = APIRouter()
+
+INCIDENT_ARTIFACT_PAGE_RESPONSES = {
+    200: {
+        "description": "Paginated incident artifact list.",
+        "content": {
+            "application/json": {
+                "example": {
+                    "items": [],
+                    "total": 0,
+                    "limit": 100,
+                    "offset": 0,
+                }
+            }
+        },
+    }
+}
 
 
 @router.post("", response_model=IncidentRead, status_code=status.HTTP_201_CREATED)
@@ -156,84 +175,119 @@ async def add_evidence(
     return EvidenceItemRead.model_validate(evidence)
 
 
-@router.get("/{incident_id}/evidence", response_model=list[EvidenceItemRead])
+@router.get(
+    "/{incident_id}/evidence",
+    response_model=Page[EvidenceItemRead],
+    responses=INCIDENT_ARTIFACT_PAGE_RESPONSES,
+)
 async def list_evidence(
     incident_id: str,
     session: DbSession,
     _: CurrentPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[EvidenceItemRead]:
-    evidence_items = await IncidentService(session).list_evidence(
+) -> Page[EvidenceItemRead]:
+    service = IncidentService(session)
+    evidence_items = await service.list_evidence(
         incident_id,
         limit=limit,
         offset=offset,
     )
-    return [EvidenceItemRead.model_validate(item) for item in evidence_items]
+    items = [EvidenceItemRead.model_validate(item) for item in evidence_items]
+    total = await service.count_evidence(incident_id)
+    return Page[EvidenceItemRead](items=items, total=total, limit=limit, offset=offset)
 
 
-@router.get("/{incident_id}/tool-calls", response_model=list[ToolCallRead])
+@router.get(
+    "/{incident_id}/tool-calls",
+    response_model=Page[ToolCallRead],
+    responses=INCIDENT_ARTIFACT_PAGE_RESPONSES,
+)
 async def list_tool_calls(
     incident_id: str,
     session: DbSession,
     _: CurrentPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[ToolCallRead]:
-    tool_calls = await IncidentService(session).list_tool_calls(
+) -> Page[ToolCallRead]:
+    service = IncidentService(session)
+    tool_calls = await service.list_tool_calls(
         incident_id,
         limit=limit,
         offset=offset,
     )
-    return [ToolCallRead.model_validate(tool_call) for tool_call in tool_calls]
+    items = [ToolCallRead.model_validate(tool_call) for tool_call in tool_calls]
+    total = await service.count_tool_calls(incident_id)
+    return Page[ToolCallRead](items=items, total=total, limit=limit, offset=offset)
 
 
-@router.get("/{incident_id}/hypotheses", response_model=list[RCAHypothesisRead])
+@router.get(
+    "/{incident_id}/hypotheses",
+    response_model=Page[RCAHypothesisRead],
+    responses=INCIDENT_ARTIFACT_PAGE_RESPONSES,
+)
 async def list_rca_hypotheses(
     incident_id: str,
     session: DbSession,
     _: CurrentPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[RCAHypothesisRead]:
-    hypotheses = await IncidentService(session).list_rca_hypotheses(
+) -> Page[RCAHypothesisRead]:
+    service = IncidentService(session)
+    hypotheses = await service.list_rca_hypotheses(
         incident_id,
         limit=limit,
         offset=offset,
     )
-    return [RCAHypothesisRead.model_validate(hypothesis) for hypothesis in hypotheses]
+    items = [RCAHypothesisRead.model_validate(hypothesis) for hypothesis in hypotheses]
+    total = await service.count_rca_hypotheses(incident_id)
+    return Page[RCAHypothesisRead](items=items, total=total, limit=limit, offset=offset)
 
 
-@router.get("/{incident_id}/model-calls", response_model=list[ModelCallRead])
+@router.get(
+    "/{incident_id}/model-calls",
+    response_model=Page[ModelCallRead],
+    responses=INCIDENT_ARTIFACT_PAGE_RESPONSES,
+)
 async def list_model_calls(
     incident_id: str,
     session: DbSession,
     _: CurrentPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[ModelCallRead]:
-    model_calls = await IncidentService(session).list_model_calls(
+) -> Page[ModelCallRead]:
+    service = IncidentService(session)
+    model_calls = await service.list_model_calls(
         incident_id,
         limit=limit,
         offset=offset,
     )
-    return [ModelCallRead.model_validate(model_call) for model_call in model_calls]
+    items = [ModelCallRead.model_validate(model_call) for model_call in model_calls]
+    total = await service.count_model_calls(incident_id)
+    return Page[ModelCallRead](items=items, total=total, limit=limit, offset=offset)
 
 
-@router.get("/{incident_id}/embeddings", response_model=list[IncidentEmbeddingRead])
+@router.get(
+    "/{incident_id}/embeddings",
+    response_model=Page[IncidentEmbeddingRead],
+    responses=INCIDENT_ARTIFACT_PAGE_RESPONSES,
+)
 async def list_incident_embeddings(
     incident_id: str,
     session: DbSession,
     _: CurrentPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[IncidentEmbeddingRead]:
-    embeddings = await IncidentService(session).list_incident_embeddings(
+) -> Page[IncidentEmbeddingRead]:
+    service = IncidentService(session)
+    embeddings = await service.list_incident_embeddings(
         incident_id,
         limit=limit,
         offset=offset,
     )
-    return [_embedding_read(embedding) for embedding in embeddings]
+    items = [_embedding_read(embedding) for embedding in embeddings]
+    total = await service.count_incident_embeddings(incident_id)
+    return Page[IncidentEmbeddingRead](items=items, total=total, limit=limit, offset=offset)
 
 
 @router.post(
@@ -251,36 +305,96 @@ async def create_remediation_plan(
     return RemediationPlanRead.model_validate(plan)
 
 
-@router.get("/{incident_id}/remediation-plans", response_model=list[RemediationPlanRead])
+@router.get(
+    "/{incident_id}/remediation-plans",
+    response_model=Page[RemediationPlanRead],
+    responses=INCIDENT_ARTIFACT_PAGE_RESPONSES,
+)
 async def list_remediation_plans(
     incident_id: str,
     session: DbSession,
     _: CurrentPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[RemediationPlanRead]:
-    plans = await IncidentService(session).list_remediation_plans(
+) -> Page[RemediationPlanRead]:
+    service = IncidentService(session)
+    plans = await service.list_remediation_plans(
         incident_id,
         limit=limit,
         offset=offset,
     )
-    return [RemediationPlanRead.model_validate(plan) for plan in plans]
+    items = [RemediationPlanRead.model_validate(plan) for plan in plans]
+    total = await service.count_remediation_plans(incident_id)
+    return Page[RemediationPlanRead](items=items, total=total, limit=limit, offset=offset)
 
 
-@router.get("/{incident_id}/documentation-reports", response_model=list[DocumentationReportRead])
+@router.get(
+    "/{incident_id}/documentation-reports",
+    response_model=Page[DocumentationReportRead],
+    responses=INCIDENT_ARTIFACT_PAGE_RESPONSES,
+)
 async def list_documentation_reports(
     incident_id: str,
     session: DbSession,
     _: CurrentPrincipal,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[DocumentationReportRead]:
-    reports = await IncidentService(session).list_documentation_reports(
+) -> Page[DocumentationReportRead]:
+    service = IncidentService(session)
+    reports = await service.list_documentation_reports(
         incident_id,
         limit=limit,
         offset=offset,
     )
-    return [DocumentationReportRead.model_validate(report) for report in reports]
+    items = [DocumentationReportRead.model_validate(report) for report in reports]
+    total = await service.count_documentation_reports(incident_id)
+    return Page[DocumentationReportRead](items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get(
+    "/{incident_id}/github-artifacts",
+    response_model=Page[GitHubArtifactRead],
+    responses=INCIDENT_ARTIFACT_PAGE_RESPONSES,
+)
+async def list_github_artifacts(
+    incident_id: str,
+    session: DbSession,
+    _: CurrentPrincipal,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> Page[GitHubArtifactRead]:
+    service = IncidentService(session)
+    artifacts = await service.list_github_artifacts(
+        incident_id,
+        limit=limit,
+        offset=offset,
+    )
+    items = [GitHubArtifactRead.model_validate(artifact) for artifact in artifacts]
+    total = await service.count_github_artifacts(incident_id)
+    return Page[GitHubArtifactRead](items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get(
+    "/{incident_id}/slack-messages",
+    response_model=Page[SlackMessageRead],
+    responses=INCIDENT_ARTIFACT_PAGE_RESPONSES,
+)
+async def list_slack_messages(
+    incident_id: str,
+    session: DbSession,
+    _: CurrentPrincipal,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> Page[SlackMessageRead]:
+    service = IncidentService(session)
+    messages = await service.list_slack_messages(
+        incident_id,
+        limit=limit,
+        offset=offset,
+    )
+    items = [SlackMessageRead.model_validate(message) for message in messages]
+    total = await service.count_slack_messages(incident_id)
+    return Page[SlackMessageRead](items=items, total=total, limit=limit, offset=offset)
 
 
 def _embedding_read(embedding) -> IncidentEmbeddingRead:
