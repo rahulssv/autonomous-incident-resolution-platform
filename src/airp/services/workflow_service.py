@@ -29,6 +29,23 @@ class IncidentWorkflowSignalService:
                 code="incident_workflow_missing",
             )
 
+        if payload.signal == "retry_failed_activity":
+            return await self.incident_service.add_event(
+                incident_id,
+                IncidentEventCreate(
+                    event_type="workflow.retry_failed_activity_requested",
+                    producer="api",
+                    payload={
+                        "actor": actor,
+                        "signal": payload.signal,
+                        "reason": payload.reason,
+                        "payload": payload.payload,
+                        "temporal_signal_sent": False,
+                        "status": "not_implemented",
+                    },
+                ),
+            )
+
         client = await get_temporal_client(self.settings)
         handle: WorkflowHandle = client.get_workflow_handle(
             incident.workflow_id,

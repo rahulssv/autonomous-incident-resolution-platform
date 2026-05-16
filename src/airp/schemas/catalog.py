@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -38,6 +38,12 @@ class ServiceRead(TimestampedRead):
         validation_alias="extra",
         serialization_alias="metadata",
     )
+
+
+class DiscoveryRefreshRequest(BaseModel):
+    scope: Literal["all", "services", "repositories", "workloads"] = "all"
+    reason: str | None = Field(default=None, max_length=500)
+    filters: dict[str, Any] = Field(default_factory=dict)
 
 
 class RepositoryCreate(BaseModel):

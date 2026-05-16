@@ -80,7 +80,7 @@ Verified from the current repository on 2026-05-16:
 - Current Temporal workflow invokes a LangGraph supervisor through the `agent_graph_run` activity and persists RCA artifacts, proposed remediation plans, and documentation report drafts.
 - Current graph embedding output is persisted to `incident_embeddings`; pgvector conversion and semantic ranking remain pending.
 - Current GenAI Hub integration is used as an optional LLM/embedding adapter; RCA, Remediation, and Documentation prompt/model-call paths are implemented, while shared prompt loading and production evals are still pending.
-- Current verification baseline is `./scripts/verify.sh` with 72 passing tests.
+- Current verification baseline is `./scripts/verify.sh` with 77 passing tests.
 
 ## Remaining Work Summary
 
@@ -98,7 +98,7 @@ The remaining product work is:
 - GenAI Hub production agent controls beyond the RCA prompt: shared prompt loading, model fallback policy, token/cost tracking, groundedness rules, prompt-injection hardening, and eval fixtures.
 - Incident memory: persisted graph embeddings, pgvector-backed embeddings, semantic search, background embedding jobs, ranking tests, and secret-safe embedding policy.
 - End-to-end RCA, remediation, documentation, and knowledge-loop behavior.
-- API completion for workflow state, audit export, policy management, refresh, republish, and remaining paginated list flows.
+- API completion for policy management and remaining paginated list flows.
 - Observability, security hardening, CI/CD, AKS production deployment, end-to-end simulations, resilience testing, and handoff documentation.
 
 ## Product Guardrails
@@ -277,7 +277,7 @@ Tasks:
 - [ ] Detect running image with no known repository.
 - [ ] Detect repository image not running in AKS.
 - [ ] Add scheduled discovery worker.
-- [ ] Add manual refresh API endpoint.
+- [x] Add manual refresh API endpoint.
 - [ ] Add discovery audit events.
 - [ ] Add tests with GitHub, DockerHub, and Kubernetes fixtures.
 
@@ -599,7 +599,7 @@ Tasks:
 - [x] Store report drafts in PostgreSQL.
 - [ ] Store final post-closure report in PostgreSQL.
 - [ ] Publish report to selected wiki target when configured.
-- [ ] Add manual republish endpoint.
+- [x] Add manual republish endpoint.
 - [ ] Generate prevention follow-up tasks.
 - [ ] Embed final report for search.
 - [ ] Add publishing retries and dead-letter behavior.
@@ -617,9 +617,9 @@ Goal: expose clean backend APIs for operators and automation clients.
 
 Tasks:
 
-- [ ] Add workflow state endpoint.
+- [x] Add workflow state endpoint.
 - [x] Add workflow signal endpoint for pause, resume, approve, reject, escalate, and close.
-- [ ] Add workflow signal endpoint for retry failed activity.
+- [x] Add workflow signal endpoint for retry failed activity.
 - [x] Add evidence listing endpoint.
 - [x] Add RCA hypothesis listing endpoint.
 - [x] Add readiness endpoint for Kubernetes MCP, GitHub MCP, and DockerHub configuration.
@@ -630,10 +630,10 @@ Tasks:
 - [x] Add incident audit event listing endpoint.
 - [x] Add remediation plan listing endpoint.
 - [x] Add documentation report listing endpoint.
-- [ ] Add audit export endpoint.
+- [x] Add audit export endpoint.
 - [ ] Add policy management endpoint for Admin users.
-- [ ] Add manual discovery refresh endpoint.
-- [ ] Add manual documentation republish endpoint.
+- [x] Add manual discovery refresh endpoint.
+- [x] Add manual documentation republish endpoint.
 - [ ] Add OpenAPI examples for all production APIs.
 
 Acceptance criteria:
@@ -907,7 +907,9 @@ Highest-priority remaining engineering tasks:
 - [x] Add API endpoints for remediation plan listing and documentation report listing.
 - [x] Add API endpoint for incident embeddings.
 - [x] Add API endpoints for GitHub artifacts and Slack messages.
-- [ ] Add API endpoints for audit export, policy management, discovery refresh, and report republish.
+- [x] Add API endpoint for audit export.
+- [x] Add API endpoints for discovery refresh and report republish.
+- [ ] Add API endpoints for policy management.
 - [ ] Add CI/CD workflows for lint, tests, migrations, Docker build, image scanning, SBOM, Helm checks, release, deployment, and rollback.
 - [ ] Deploy and validate AIRP API, alert consumer, and Temporal worker on Azure AKS with Kubernetes secrets and production auth.
 - [ ] Run end-to-end simulations for latency, crash loop, bad config, and failed deployment incidents.
@@ -1005,14 +1007,14 @@ Governed external actions:
 
 API completion:
 
-- [ ] Add workflow state endpoint and retry-failed-activity signal endpoint.
+- [x] Add workflow state endpoint and retry-failed-activity signal endpoint.
 - [x] Add remediation plan listing endpoint.
 - [x] Add documentation report listing endpoint.
 - [x] Add incident embedding listing endpoint.
 - [x] Add GitHub artifact and Slack message listing endpoints.
-- [ ] Add audit export endpoint.
+- [x] Add audit export endpoint.
 - [ ] Add Admin policy management endpoint.
-- [ ] Add discovery refresh and documentation republish endpoints.
+- [x] Add discovery refresh and documentation republish endpoints.
 - [ ] Add OpenAPI examples for production APIs.
 
 Operations, security, deployment, and handoff:
@@ -1251,18 +1253,55 @@ Verification:
 - `pytest tests/integration/test_backend_smoke.py -q` passes with 7 tests.
 - `./scripts/verify.sh` passes with 72 tests.
 
-## Immediate Next Sprint
+## Completed Sprint: Workflow Visibility and Audit Export APIs
 
 Sprint goal: add workflow visibility and operator export surfaces without changing incident execution behavior.
 
 Tasks:
 
-1. [ ] Add `GET /api/incidents/{incident_id}/workflow/state` for current workflow ID, run ID, incident status, and latest workflow-related timeline event.
-2. [ ] Add a retry-failed-activity workflow signal contract without invoking retries until Temporal support is complete.
-3. [ ] Add audit export endpoint for incident events with JSON response first.
-4. [ ] Add tests for workflow-state route registration, response schema, and audit export shape.
-5. [ ] Update OpenAPI examples for workflow state and audit export.
-6. [ ] Keep workflow execution, retry activity behavior, and external writes unchanged until workflow hardening is complete.
+1. [x] Add `GET /api/incidents/{incident_id}/workflow/state` for current workflow ID, run ID, incident status, and latest workflow-related timeline event.
+2. [x] Add a retry-failed-activity workflow signal contract without invoking retries until Temporal support is complete.
+3. [x] Add audit export endpoint for incident events with JSON response first.
+4. [x] Add tests for workflow-state route registration, response schema, and audit export shape.
+5. [x] Update OpenAPI examples for workflow state and audit export.
+6. [x] Keep workflow execution, retry activity behavior, and external writes unchanged until workflow hardening is complete.
+
+Verification:
+
+- Focused `ruff check` for touched API, schema, service, and workflow test files passes.
+- Focused smoke and Temporal workflow tests pass with 12 tests.
+- `./scripts/verify.sh` passes with 75 tests.
+
+## Completed Sprint: Audit-Only Operator Control APIs
+
+Sprint goal: add safe operator control endpoints for manual refresh and documentation republish requests without enabling external side effects.
+
+Tasks:
+
+1. [x] Add request schemas for manual discovery refresh and documentation republish commands.
+2. [x] Add `POST /api/services/refresh` as an audit-only command acknowledgement.
+3. [x] Add `POST /api/incidents/{incident_id}/documentation-reports/{report_id}/republish` that records a republish request only.
+4. [x] Add response schemas that clearly mark external execution as `pending_implementation` or `disabled_by_policy`.
+5. [x] Add route registration and response-shape tests.
+6. [x] Keep discovery jobs, wiki publishing, Slack sends, GitHub writes, and repository writes disabled until policy and worker support are complete.
+
+Verification:
+
+- Focused `ruff check` for touched API, schema, service, and smoke-test files passes.
+- `pytest tests/integration/test_backend_smoke.py -q` passes with 11 tests.
+- `./scripts/verify.sh` passes with 77 tests.
+
+## Immediate Next Sprint
+
+Sprint goal: add read-only policy visibility so operators can inspect the disabled-by-default automation guardrails before write paths are implemented.
+
+Tasks:
+
+1. [ ] Add policy read schemas for GitHub issue creation, Slack notification, remediation PR creation, documentation publishing, repository allowlists, namespace allowlists, and MCP read settings.
+2. [ ] Add `GET /api/policy` or equivalent Admin policy endpoint returning effective runtime settings without secrets.
+3. [ ] Add OpenAPI examples for the effective policy response.
+4. [ ] Add tests that policy responses redact secrets and preserve disabled-by-default write flags.
+5. [ ] Keep policy mutation, GitHub writes, Slack sends, wiki publishing, branch creation, and PR creation disabled.
 
 ## Verified Remaining Critical Path
 
@@ -1272,7 +1311,7 @@ Verified from the repository on 2026-05-16:
 2. Governance: wire the existing feature flags, idempotency helper, repository allowlists, and namespace allowlists into future write paths, then add approval policy and blocked-path policy before any GitHub or Slack writes.
 3. Agent completion: extend the Remediation and Documentation nodes with approval workflow states, final artifact enrichment, and governed external writes.
 4. Memory: add pgvector migration, confirm embedding dimensions, and switch incident search to vector-backed ranking when query text is present.
-5. APIs: add audit export, policy, discovery refresh, workflow-state, documentation republish, and remaining paginated list endpoints.
+5. APIs: add policy and remaining paginated list endpoints.
 6. Operations: add metrics, health/readiness checks, structured logging with request/correlation IDs, CI/CD workflows, scans, SBOM, and AKS production validation.
 
 ## Production-Ready Definition

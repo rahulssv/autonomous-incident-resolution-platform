@@ -8,6 +8,16 @@ class APIMessage(BaseModel):
     message: str
 
 
+class OperatorCommandRead(BaseModel):
+    operation_id: str
+    operation: str
+    status: str
+    message: str
+    external_execution_enabled: bool = False
+    requested_at: datetime
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class Page[T](BaseModel):
     items: list[T]
     total: int

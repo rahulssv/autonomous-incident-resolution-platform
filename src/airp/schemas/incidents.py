@@ -70,7 +70,15 @@ class IncidentSignal(BaseModel):
 
 
 class WorkflowSignalRequest(BaseModel):
-    signal: Literal["pause", "resume", "approve", "reject", "escalate", "close"]
+    signal: Literal[
+        "pause",
+        "resume",
+        "approve",
+        "reject",
+        "escalate",
+        "close",
+        "retry_failed_activity",
+    ]
     reason: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -78,6 +86,22 @@ class WorkflowSignalRequest(BaseModel):
 class IncidentTimeline(BaseModel):
     incident: IncidentRead
     events: list[IncidentEventRead]
+
+
+class IncidentWorkflowStateRead(BaseModel):
+    incident_id: str
+    incident_status: str
+    workflow_id: str | None = None
+    workflow_run_id: str | None = None
+    has_workflow: bool
+    latest_workflow_event: IncidentEventRead | None = None
+
+
+class IncidentAuditExportRead(BaseModel):
+    incident: IncidentRead
+    events: list[IncidentEventRead]
+    exported_at: datetime
+    format_version: str = "airp.incident_audit.v1"
 
 
 class ApprovalCreate(BaseModel):
@@ -240,6 +264,13 @@ class DocumentationReportRead(TimestampedRead):
         validation_alias="extra",
         serialization_alias="metadata",
     )
+
+
+class DocumentationRepublishRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+    target: str | None = Field(default=None, max_length=160)
+    force: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class GitHubArtifactRead(TimestampedRead):

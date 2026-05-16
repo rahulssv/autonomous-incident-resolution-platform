@@ -3,7 +3,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -151,6 +151,22 @@ class IncidentService:
             .order_by(IncidentEvent.created_at)
         )
         return list((await self.session.scalars(stmt)).all())
+
+    async def get_latest_workflow_event(self, incident_id: str) -> IncidentEvent | None:
+        await self.get_incident(incident_id)
+        stmt = (
+            select(IncidentEvent)
+            .where(
+                IncidentEvent.incident_id == incident_id,
+                or_(
+                    IncidentEvent.event_type.like("workflow.%"),
+                    IncidentEvent.producer == "temporal-workflow",
+                ),
+            )
+            .order_by(IncidentEvent.created_at.desc())
+            .limit(1)
+        )
+        return await self.session.scalar(stmt)
 
     async def add_event(self, incident_id: str, payload: IncidentEventCreate) -> IncidentEvent:
         await self.get_incident(incident_id)
@@ -374,6 +390,15 @@ class IncidentService:
     async def count_documentation_reports(self, incident_id: str) -> int:
         await self.get_incident(incident_id)
         return await self._count_for_incident(DocumentationReport, incident_id)
+
+    async def get_documentation_report(
+        self, incident_id: str, report_id: str
+    ) -> DocumentationReport:
+        await self.get_incident(incident_id)
+        report = await self.session.get(DocumentationReport, report_id)
+        if report is None or report.incident_id != incident_id:
+            raise NotFoundError("documentation_report", report_id)
+        return report
 
     async def list_github_artifacts(
         self, incident_id: str, *, limit: int = 100, offset: int = 0

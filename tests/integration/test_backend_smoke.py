@@ -1,19 +1,25 @@
 import asyncio
+from datetime import UTC, datetime
 
 from airp.core.middleware import CORRELATION_ID_HEADER, REQUEST_ID_HEADER
 from airp.domain.enums import IncidentStatus
 from airp.main import create_app
-from airp.schemas.catalog import ServiceCreate
-from airp.schemas.common import Page
+from airp.schemas.catalog import DiscoveryRefreshRequest, ServiceCreate
+from airp.schemas.common import OperatorCommandRead, Page
 from airp.schemas.incidents import (
     DocumentationReportCreate,
     DocumentationReportRead,
+    DocumentationRepublishRequest,
     EvidenceItemRead,
     GitHubArtifactRead,
+    IncidentAuditExportRead,
     IncidentCreate,
     IncidentEmbeddingCreate,
     IncidentEmbeddingRead,
+    IncidentEventRead,
+    IncidentRead,
     IncidentSignal,
+    IncidentWorkflowStateRead,
     ModelCallRead,
     RCAHypothesisRead,
     RemediationPlanRead,
@@ -30,16 +36,20 @@ def test_app_registers_expected_routes() -> None:
     assert "/api/readiness" in paths
     assert "/api/incidents" in paths
     assert "/api/incidents/{incident_id}/workflow/signals" in paths
+    assert "/api/incidents/{incident_id}/workflow/state" in paths
     assert "/api/incidents/{incident_id}/evidence" in paths
+    assert "/api/incidents/{incident_id}/audit/export" in paths
     assert "/api/incidents/{incident_id}/tool-calls" in paths
     assert "/api/incidents/{incident_id}/hypotheses" in paths
     assert "/api/incidents/{incident_id}/model-calls" in paths
     assert "/api/incidents/{incident_id}/embeddings" in paths
     assert "/api/incidents/{incident_id}/remediation-plans" in paths
     assert "/api/incidents/{incident_id}/documentation-reports" in paths
+    assert "/api/incidents/{incident_id}/documentation-reports/{report_id}/republish" in paths
     assert "/api/incidents/{incident_id}/github-artifacts" in paths
     assert "/api/incidents/{incident_id}/slack-messages" in paths
     assert "/api/services" in paths
+    assert "/api/services/refresh" in paths
     assert "/api/repositories" in paths
     assert "/api/workloads" in paths
     assert "/api/search/incidents" in paths
@@ -80,6 +90,99 @@ def test_incident_artifact_routes_use_paginated_response_models() -> None:
 
     for path, response_model in expected_response_models.items():
         assert get_routes[path].response_model == response_model
+
+
+def test_workflow_state_and_audit_export_routes_use_response_models() -> None:
+    app = create_app()
+    get_routes = {
+        route.path: route for route in app.routes if "GET" in getattr(route, "methods", set())
+    }
+
+    assert (
+        get_routes["/api/incidents/{incident_id}/workflow/state"].response_model
+        == IncidentWorkflowStateRead
+    )
+    assert (
+        get_routes["/api/incidents/{incident_id}/audit/export"].response_model
+        == IncidentAuditExportRead
+    )
+
+
+def test_operator_command_routes_use_response_models() -> None:
+    app = create_app()
+    post_routes = {
+        route.path: route for route in app.routes if "POST" in getattr(route, "methods", set())
+    }
+
+    assert post_routes["/api/services/refresh"].response_model == OperatorCommandRead
+    assert (
+        post_routes["/api/incidents/{incident_id}/documentation-reports/{report_id}/republish"]
+        .response_model
+        == OperatorCommandRead
+    )
+
+
+def test_workflow_state_and_audit_export_schema_shape() -> None:
+    now = datetime.now(UTC)
+    incident = IncidentRead(
+        id="inc-123",
+        created_at=now,
+        updated_at=now,
+        title="Checkout latency spike",
+        severity="critical",
+        status="validated",
+        environment="prod",
+        started_at=now,
+        metadata={"source": "test"},
+    )
+    event = IncidentEventRead(
+        id="evt-123",
+        created_at=now,
+        updated_at=now,
+        incident_id="inc-123",
+        event_type="workflow.step.completed",
+        producer="temporal-workflow",
+        payload={"step": "rca_hypotheses_generated"},
+    )
+
+    workflow_state = IncidentWorkflowStateRead(
+        incident_id="inc-123",
+        incident_status="validated",
+        workflow_id="airp-incident-inc-123",
+        workflow_run_id="run-123",
+        has_workflow=True,
+        latest_workflow_event=event,
+    )
+    audit_export = IncidentAuditExportRead(incident=incident, events=[event], exported_at=now)
+
+    assert workflow_state.latest_workflow_event.event_type == "workflow.step.completed"
+    assert audit_export.format_version == "airp.incident_audit.v1"
+    assert audit_export.events[0].producer == "temporal-workflow"
+
+
+def test_operator_command_request_schema_shape() -> None:
+    refresh = DiscoveryRefreshRequest(
+        scope="workloads",
+        reason="verify AKS inventory",
+        filters={"namespace": "shopfast"},
+    )
+    republish = DocumentationRepublishRequest(
+        reason="publish corrected RCA",
+        target="wiki",
+        metadata={"requested_by": "test"},
+    )
+    command = OperatorCommandRead(
+        operation_id="cmd-123",
+        operation="documentation.republish",
+        status="disabled_by_policy",
+        message="Documentation publishing is disabled by policy.",
+        requested_at=datetime.now(UTC),
+        payload={"report_id": "report-123"},
+    )
+
+    assert refresh.scope == "workloads"
+    assert republish.target == "wiki"
+    assert command.external_execution_enabled is False
 
 
 def test_service_schema_normalizes_client_mapping_fields() -> None:

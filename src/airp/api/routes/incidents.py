@@ -1,16 +1,20 @@
 import hashlib
 import json
+from datetime import UTC, datetime
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Query, status
 
 from airp.api.deps import CurrentPrincipal, DbSession
-from airp.schemas.common import Page
+from airp.schemas.common import OperatorCommandRead, Page
 from airp.schemas.incidents import (
     DocumentationReportRead,
+    DocumentationRepublishRequest,
     EvidenceItemCreate,
     EvidenceItemRead,
     GitHubArtifactRead,
+    IncidentAuditExportRead,
     IncidentCreate,
     IncidentEmbeddingRead,
     IncidentEventCreate,
@@ -18,6 +22,7 @@ from airp.schemas.incidents import (
     IncidentRead,
     IncidentSignal,
     IncidentTimeline,
+    IncidentWorkflowStateRead,
     ModelCallRead,
     RCAHypothesisRead,
     RemediationPlanCreate,
@@ -41,6 +46,63 @@ INCIDENT_ARTIFACT_PAGE_RESPONSES = {
                     "total": 0,
                     "limit": 100,
                     "offset": 0,
+                }
+            }
+        },
+    }
+}
+
+WORKFLOW_STATE_RESPONSES = {
+    200: {
+        "description": "Current persisted incident workflow state.",
+        "content": {
+            "application/json": {
+                "example": {
+                    "incident_id": "inc_123",
+                    "incident_status": "validated",
+                    "workflow_id": "airp-incident-inc_123",
+                    "workflow_run_id": "run_123",
+                    "has_workflow": True,
+                    "latest_workflow_event": None,
+                }
+            }
+        },
+    }
+}
+
+AUDIT_EXPORT_RESPONSES = {
+    200: {
+        "description": "JSON audit export for an incident.",
+        "content": {
+            "application/json": {
+                "example": {
+                    "incident": {
+                        "id": "inc_123",
+                        "title": "Checkout latency spike",
+                        "status": "validated",
+                    },
+                    "events": [],
+                    "exported_at": "2026-05-16T00:00:00Z",
+                    "format_version": "airp.incident_audit.v1",
+                }
+            }
+        },
+    }
+}
+
+DOCUMENTATION_REPUBLISH_RESPONSES = {
+    202: {
+        "description": "Documentation republish request recorded without external publishing.",
+        "content": {
+            "application/json": {
+                "example": {
+                    "operation_id": "doc-republish-123",
+                    "operation": "documentation.republish",
+                    "status": "disabled_by_policy",
+                    "message": "Documentation publishing is disabled by policy.",
+                    "external_execution_enabled": False,
+                    "requested_at": "2026-05-16T00:00:00Z",
+                    "payload": {"report_id": "report_123"},
                 }
             }
         },
@@ -108,6 +170,33 @@ async def get_timeline(
     )
 
 
+@router.get(
+    "/{incident_id}/workflow/state",
+    response_model=IncidentWorkflowStateRead,
+    responses=WORKFLOW_STATE_RESPONSES,
+)
+async def get_workflow_state(
+    incident_id: str,
+    session: DbSession,
+    _: CurrentPrincipal,
+) -> IncidentWorkflowStateRead:
+    service = IncidentService(session)
+    incident = await service.get_incident(incident_id)
+    latest_workflow_event = await service.get_latest_workflow_event(incident_id)
+    return IncidentWorkflowStateRead(
+        incident_id=incident.id,
+        incident_status=incident.status,
+        workflow_id=incident.workflow_id,
+        workflow_run_id=incident.workflow_run_id,
+        has_workflow=bool(incident.workflow_id),
+        latest_workflow_event=(
+            IncidentEventRead.model_validate(latest_workflow_event)
+            if latest_workflow_event is not None
+            else None
+        ),
+    )
+
+
 @router.get("/{incident_id}/audit", response_model=list[IncidentEventRead])
 async def get_audit_events(
     incident_id: str,
@@ -116,6 +205,26 @@ async def get_audit_events(
 ) -> list[IncidentEventRead]:
     events = await IncidentService(session).get_events(incident_id)
     return [IncidentEventRead.model_validate(event) for event in events]
+
+
+@router.get(
+    "/{incident_id}/audit/export",
+    response_model=IncidentAuditExportRead,
+    responses=AUDIT_EXPORT_RESPONSES,
+)
+async def export_audit_events(
+    incident_id: str,
+    session: DbSession,
+    _: CurrentPrincipal,
+) -> IncidentAuditExportRead:
+    service = IncidentService(session)
+    incident = await service.get_incident(incident_id)
+    events = await service.get_events(incident_id)
+    return IncidentAuditExportRead(
+        incident=IncidentRead.model_validate(incident),
+        events=[IncidentEventRead.model_validate(event) for event in events],
+        exported_at=datetime.now(UTC),
+    )
 
 
 @router.post(
@@ -349,6 +458,54 @@ async def list_documentation_reports(
     items = [DocumentationReportRead.model_validate(report) for report in reports]
     total = await service.count_documentation_reports(incident_id)
     return Page[DocumentationReportRead](items=items, total=total, limit=limit, offset=offset)
+
+
+@router.post(
+    "/{incident_id}/documentation-reports/{report_id}/republish",
+    response_model=OperatorCommandRead,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=DOCUMENTATION_REPUBLISH_RESPONSES,
+)
+async def request_documentation_republish(
+    incident_id: str,
+    report_id: str,
+    payload: DocumentationRepublishRequest,
+    session: DbSession,
+    principal: CurrentPrincipal,
+) -> OperatorCommandRead:
+    service = IncidentService(session)
+    report = await service.get_documentation_report(incident_id, report_id)
+    event = await service.add_event(
+        incident_id,
+        IncidentEventCreate(
+            event_type="documentation.republish_requested",
+            producer="api",
+            payload={
+                "actor": principal.username or principal.subject,
+                "report_id": report.id,
+                "target": payload.target,
+                "reason": payload.reason,
+                "force": payload.force,
+                "metadata": payload.metadata,
+                "external_execution_enabled": False,
+                "status": "disabled_by_policy",
+            },
+        ),
+    )
+    return OperatorCommandRead(
+        operation_id=f"documentation-republish-{uuid4()}",
+        operation="documentation.republish",
+        status="disabled_by_policy",
+        message="Documentation publishing is disabled by policy.",
+        external_execution_enabled=False,
+        requested_at=datetime.now(UTC),
+        payload={
+            "incident_id": incident_id,
+            "report_id": report.id,
+            "event_id": event.id,
+            "target": payload.target,
+        },
+    )
 
 
 @router.get(
