@@ -8,6 +8,7 @@ from airp.messaging.alertmanager import NormalizedAlert, normalize_alertmanager_
 from airp.messaging.dedupe import DedupeStore
 from airp.schemas.incidents import IncidentEventCreate
 from airp.services.incident_service import IncidentService
+from airp.workflows.client import IncidentWorkflowStarter
 
 
 @dataclass
@@ -23,10 +24,12 @@ class AlertIngestionService:
         session: AsyncSession,
         dedupe_store: DedupeStore,
         settings: Settings | None = None,
+        workflow_starter: IncidentWorkflowStarter | None = None,
     ) -> None:
         self.session = session
         self.dedupe_store = dedupe_store
         self.settings = settings or get_settings()
+        self.workflow_starter = workflow_starter
         self.incidents = IncidentService(session)
 
     async def ingest_alertmanager_payload(
@@ -82,4 +85,45 @@ class AlertIngestionService:
                 },
             ),
         )
+        await self._start_workflow(
+            incident.id,
+            severity=incident.severity,
+            correlation_id=incident.correlation_id,
+            actor=actor,
+        )
         return incident.id
+
+    async def _start_workflow(
+        self,
+        incident_id: str,
+        *,
+        severity: str,
+        correlation_id: str | None,
+        actor: str,
+    ) -> None:
+        if self.workflow_starter is None:
+            return
+
+        try:
+            start = await self.workflow_starter.start_incident_workflow(
+                incident_id=incident_id,
+                severity=severity,
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:
+            await self.incidents.add_event(
+                incident_id,
+                IncidentEventCreate(
+                    event_type="workflow.start_failed",
+                    producer="monitoring-agent",
+                    payload={"error": str(exc)},
+                ),
+            )
+            return
+
+        await self.incidents.attach_workflow(
+            incident_id,
+            workflow_id=start.workflow_id,
+            workflow_run_id=start.workflow_run_id,
+            actor=actor,
+        )

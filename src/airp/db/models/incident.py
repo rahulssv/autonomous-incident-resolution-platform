@@ -40,6 +40,8 @@ class Incident(IdMixin, TimestampMixin, Base):
     pod_name: Mapped[str | None] = mapped_column(String(240), nullable=True)
     image_tag: Mapped[str | None] = mapped_column(String(240), nullable=True)
     image_digest: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    workflow_id: Mapped[str | None] = mapped_column(String(240), nullable=True, index=True)
+    workflow_run_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
     github_issue_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     slack_thread_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

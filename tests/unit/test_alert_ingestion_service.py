@@ -9,6 +9,7 @@ from airp.messaging.dedupe import InMemoryDedupeStore
 from airp.schemas.incidents import IncidentCreate
 from airp.services.alert_ingestion_service import AlertIngestionService
 from airp.services.incident_service import IncidentService
+from airp.workflows.client import WorkflowStartResult
 
 
 class FakeSession:
@@ -44,6 +45,7 @@ class FakeIncidentService:
         self.existing = None
         self.created = False
         self.events = []
+        self.attached_workflow = None
 
     async def get_incident_by_idempotency_key(self, idempotency_key: str):
         _ = idempotency_key
@@ -52,11 +54,36 @@ class FakeIncidentService:
     async def create_incident_once(self, payload: IncidentCreate, *, actor: str):
         _ = payload, actor
         self.created = True
-        self.existing = SimpleNamespace(id="inc-1")
+        self.existing = SimpleNamespace(
+            id="inc-1",
+            severity=payload.severity.value,
+            correlation_id=payload.correlation_id,
+        )
         return self.existing, True
 
     async def add_event(self, incident_id: str, payload):
         self.events.append((incident_id, payload))
+
+    async def attach_workflow(self, incident_id: str, **kwargs):
+        self.attached_workflow = (incident_id, kwargs)
+
+
+class FakeWorkflowStarter:
+    def __init__(self) -> None:
+        self.started = []
+
+    async def start_incident_workflow(
+        self,
+        *,
+        incident_id: str,
+        severity: str,
+        correlation_id: str | None,
+    ) -> WorkflowStartResult:
+        self.started.append((incident_id, severity, correlation_id))
+        return WorkflowStartResult(
+            workflow_id=f"airp-incident-{incident_id}",
+            workflow_run_id="run-1",
+        )
 
 
 def sample_alertmanager_payload() -> dict:
@@ -125,3 +152,31 @@ async def test_alert_ingestion_uses_service_idempotency_after_redis_replay() -> 
     assert replay.duplicate_keys == ["prod:shopfast:checkout-api:HighLatency:critical:abc123"]
     assert len(incidents.events) == 1
     assert incidents.events[0][1].event_type == "alert.validated"
+
+
+@pytest.mark.asyncio
+async def test_alert_ingestion_starts_workflow_for_new_incident() -> None:
+    payload = sample_alertmanager_payload()
+    incidents = FakeIncidentService()
+    workflow_starter = FakeWorkflowStarter()
+    service = AlertIngestionService(
+        FakeSession(),
+        InMemoryDedupeStore(),
+        workflow_starter=workflow_starter,
+    )
+    service.incidents = incidents
+
+    result = await service.ingest_alertmanager_payload(payload)
+
+    assert result.created_incident_ids == ["inc-1"]
+    assert workflow_starter.started == [
+        ("inc-1", "critical", "prod:shopfast:checkout-api:HighLatency:critical:abc123")
+    ]
+    assert incidents.attached_workflow == (
+        "inc-1",
+        {
+            "workflow_id": "airp-incident-inc-1",
+            "workflow_run_id": "run-1",
+            "actor": "monitoring-agent",
+        },
+    )

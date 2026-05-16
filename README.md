@@ -59,6 +59,10 @@ AIRP_KAFKA_USERNAME=$ConnectionString
 AIRP_KAFKA_PASSWORD=<event-hubs-connection-string>
 AIRP_KAFKA_ALERTS_RAW_TOPIC=airp.alerts.raw
 AIRP_KAFKA_DEADLETTER_TOPIC=airp.deadletter
+
+AIRP_TEMPORAL_ADDRESS=localhost:7233
+AIRP_TEMPORAL_NAMESPACE=default
+AIRP_TEMPORAL_TASK_QUEUE=airp-incident-workflows
 ```
 
 ## API Surface
@@ -70,6 +74,7 @@ AIRP_KAFKA_DEADLETTER_TOPIC=airp.deadletter
 - `GET /api/incidents/{incident_id}/timeline`
 - `GET /api/incidents/{incident_id}/audit`
 - `POST /api/incidents/{incident_id}/signals`
+- `POST /api/incidents/{incident_id}/workflow/signals`
 - `POST /api/incidents/{incident_id}/evidence`
 - `POST /api/incidents/{incident_id}/remediation-plans`
 - `POST /api/incidents/{incident_id}/approvals`
@@ -105,6 +110,16 @@ Publish a sample alert into the configured Event Hubs topic:
 ```
 
 The sample alert uses a stable fingerprint and incident idempotency key, so repeated publishes should map to one incident row while replay attempts are tracked as duplicates.
+
+## Temporal Worker
+
+Run the Temporal worker that owns incident workflows:
+
+```bash
+./scripts/run-temporal-worker.sh
+```
+
+When `AIRP_TEMPORAL_START_WORKFLOWS=true`, the alert consumer starts a durable workflow for every newly created incident and stores the workflow ID on the incident row.
 
 ## Deployment
 

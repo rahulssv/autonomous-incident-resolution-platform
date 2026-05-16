@@ -84,7 +84,30 @@ Apply migrations:
 AIRP_DATABASE_URL=postgresql+asyncpg://<user>:<password>@<host>:5432/<db> alembic upgrade head
 ```
 
-## 7. Helm Deploy
+## 7. Configure Temporal
+
+Runtime values:
+
+```text
+AIRP_TEMPORAL_ADDRESS=<temporal-host>:7233
+AIRP_TEMPORAL_NAMESPACE=default
+AIRP_TEMPORAL_TASK_QUEUE=airp-incident-workflows
+AIRP_TEMPORAL_START_WORKFLOWS=true
+```
+
+Run the Temporal worker locally:
+
+```bash
+./scripts/run-temporal-worker.sh
+```
+
+In production, deploy it as a separate worker Deployment using:
+
+```bash
+python -m airp.workers.temporal_worker
+```
+
+## 8. Helm Deploy
 
 Create a production values file, for example `deploy/helm/airp/prod-values.yaml`:
 
@@ -100,6 +123,7 @@ env:
   AIRP_ENTRA_TENANT_ID: <tenant-id>
   AIRP_ENTRA_CLIENT_ID: <client-id>
   AIRP_KAFKA_BOOTSTRAP_SERVERS: <namespace>.servicebus.windows.net:9093
+  AIRP_TEMPORAL_ADDRESS: <temporal-host>:7233
 
 secretEnv:
   AIRP_GATEWAY_API_KEY: <secret>
@@ -148,7 +172,9 @@ In production this should be packaged as a separate worker Deployment that uses 
 python -m airp.workers.alert_consumer
 ```
 
-## 8. Security Checklist
+The Helm chart includes separate Deployments for the API, alert consumer, and Temporal worker. Disable workers in `values.yaml` only when running them outside the chart.
+
+## 9. Security Checklist
 
 - Keep Microsoft Entra ID auth enabled.
 - Store GenAI Hub, Event Hubs, GitHub, Slack, and database secrets in Kubernetes Secrets or external secret manager.

@@ -68,6 +68,36 @@ class IncidentService:
         stmt = select(Incident).where(Incident.idempotency_key == idempotency_key)
         return await self.session.scalar(stmt)
 
+    async def attach_workflow(
+        self,
+        incident_id: str,
+        *,
+        workflow_id: str,
+        workflow_run_id: str | None,
+        actor: str,
+    ) -> Incident:
+        incident = await self.get_incident(incident_id)
+        if incident.workflow_id == workflow_id and incident.workflow_run_id == workflow_run_id:
+            return incident
+
+        incident.workflow_id = workflow_id
+        incident.workflow_run_id = workflow_run_id
+        self.session.add(
+            IncidentEvent(
+                incident_id=incident.id,
+                event_type="workflow.started",
+                producer="temporal",
+                payload={
+                    "actor": actor,
+                    "workflow_id": workflow_id,
+                    "workflow_run_id": workflow_run_id,
+                },
+            )
+        )
+        await self.session.commit()
+        await self.session.refresh(incident)
+        return incident
+
     async def list_incidents(
         self,
         *,

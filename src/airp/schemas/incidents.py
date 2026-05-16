@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -37,6 +37,8 @@ class IncidentRead(TimestampedRead):
     pod_name: str | None = None
     image_tag: str | None = None
     image_digest: str | None = None
+    workflow_id: str | None = None
+    workflow_run_id: str | None = None
     github_issue_url: str | None = None
     slack_thread_url: str | None = None
     started_at: datetime
@@ -63,6 +65,12 @@ class IncidentEventRead(TimestampedRead):
 
 class IncidentSignal(BaseModel):
     status: IncidentStatus
+    reason: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowSignalRequest(BaseModel):
+    signal: Literal["pause", "resume", "approve", "reject", "escalate", "close"]
     reason: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
 

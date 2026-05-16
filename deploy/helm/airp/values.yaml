@@ -23,6 +23,13 @@ env:
   AIRP_KAFKA_SECURITY_PROTOCOL: SASL_SSL
   AIRP_KAFKA_SASL_MECHANISM: PLAIN
   AIRP_KAFKA_USERNAME: "$ConnectionString"
+  AIRP_KAFKA_ALERTS_RAW_TOPIC: airp.alerts.raw
+  AIRP_KAFKA_DEADLETTER_TOPIC: airp.deadletter
+  AIRP_KAFKA_ALERT_CONSUMER_GROUP: airp-alert-consumer
+  AIRP_TEMPORAL_ADDRESS: ""
+  AIRP_TEMPORAL_NAMESPACE: default
+  AIRP_TEMPORAL_TASK_QUEUE: airp-incident-workflows
+  AIRP_TEMPORAL_START_WORKFLOWS: "true"
 
 secretEnv:
   AIRP_GATEWAY_API_KEY: ""
@@ -48,6 +55,16 @@ securityContext:
     drop:
       - ALL
 
+workers:
+  alertConsumer:
+    enabled: true
+    replicaCount: 1
+    command: ["python", "-m", "airp.workers.alert_consumer"]
+  temporal:
+    enabled: true
+    replicaCount: 1
+    command: ["python", "-m", "airp.workers.temporal_worker"]
+
 ingress:
   enabled: false
   className: nginx
@@ -57,4 +74,3 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
-

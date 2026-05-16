@@ -14,8 +14,10 @@ from airp.schemas.incidents import (
     IncidentTimeline,
     RemediationPlanCreate,
     RemediationPlanRead,
+    WorkflowSignalRequest,
 )
 from airp.services.incident_service import IncidentService
+from airp.services.workflow_service import IncidentWorkflowSignalService
 
 router = APIRouter()
 
@@ -116,6 +118,22 @@ async def signal_incident(
         actor=principal.username or principal.subject,
     )
     return IncidentRead.model_validate(incident)
+
+
+@router.post("/{incident_id}/workflow/signals", response_model=IncidentEventRead)
+async def signal_incident_workflow(
+    incident_id: str,
+    payload: WorkflowSignalRequest,
+    session: DbSession,
+    principal: CurrentPrincipal,
+) -> IncidentEventRead:
+    incident_service = IncidentService(session)
+    event = await IncidentWorkflowSignalService(incident_service).signal_workflow(
+        incident_id,
+        payload,
+        actor=principal.username or principal.subject,
+    )
+    return IncidentEventRead.model_validate(event)
 
 
 @router.post(

@@ -16,6 +16,7 @@ from airp.messaging.contracts import DeadLetterEvent
 from airp.messaging.dedupe import RedisDedupeStore
 from airp.messaging.eventhub_kafka import build_consumer, build_producer, publish_json
 from airp.services.alert_ingestion_service import AlertIngestionService
+from airp.workflows.client import TemporalIncidentWorkflowStarter
 
 logger = get_logger(__name__)
 
@@ -36,12 +37,21 @@ class AlertConsumerWorker:
             self.settings,
         )
         self.producer = build_producer(self.settings)
+        self.workflow_starter = (
+            TemporalIncidentWorkflowStarter(self.settings)
+            if self.settings.temporal_start_workflows
+            else None
+        )
         self._running = True
 
     async def process_message_value(self, value: bytes | str) -> ProcessedMessage:
         payload = self._decode_payload(value)
         async with AsyncSessionLocal() as session:
-            service = AlertIngestionService(session, RedisDedupeStore(settings=self.settings))
+            service = AlertIngestionService(
+                session,
+                RedisDedupeStore(settings=self.settings),
+                workflow_starter=self.workflow_starter,
+            )
             result = await service.ingest_alertmanager_payload(payload)
         return ProcessedMessage(
             created_incident_ids=result.created_incident_ids,

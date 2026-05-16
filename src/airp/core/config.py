@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     kafka_alert_consumer_group: str = "airp-alert-consumer"
     alert_dedupe_ttl_seconds: int = 3600
 
+    temporal_address: str = "localhost:7233"
+    temporal_namespace: str = "default"
+    temporal_task_queue: str = "airp-incident-workflows"
+    temporal_tls: bool = False
+    temporal_start_workflows: bool = True
+
     @field_validator("api_prefix")
     @classmethod
     def normalize_api_prefix(cls, value: str) -> str:
