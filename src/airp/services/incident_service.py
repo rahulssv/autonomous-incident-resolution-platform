@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -6,7 +8,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from airp.core.errors import NotFoundError
-from airp.db.models.incident import EvidenceItem, Incident, IncidentEvent, RemediationPlan
+from airp.db.models.incident import (
+    EvidenceItem,
+    Incident,
+    IncidentEvent,
+    RemediationPlan,
+    ToolCall,
+)
 from airp.domain.enums import IncidentStatus
 from airp.schemas.incidents import (
     EvidenceItemCreate,
@@ -178,6 +186,32 @@ class IncidentService:
         await self.session.refresh(evidence)
         return evidence
 
+    async def add_tool_call(
+        self,
+        incident_id: str,
+        *,
+        tool_server: str,
+        tool_name: str,
+        parameters: dict[str, Any],
+        result: dict[str, Any] | None = None,
+        latency_ms: int | None = None,
+        error: str | None = None,
+    ) -> ToolCall:
+        await self.get_incident(incident_id)
+        tool_call = ToolCall(
+            incident_id=incident_id,
+            tool_server=tool_server,
+            tool_name=tool_name,
+            parameters_hash=_stable_hash(parameters),
+            result_hash=_stable_hash(result) if result is not None else None,
+            latency_ms=latency_ms,
+            error=error,
+        )
+        self.session.add(tool_call)
+        await self.session.commit()
+        await self.session.refresh(tool_call)
+        return tool_call
+
     async def create_remediation_plan(
         self,
         incident_id: str,
@@ -191,3 +225,8 @@ class IncidentService:
         await self.session.commit()
         await self.session.refresh(plan)
         return plan
+
+
+def _stable_hash(value: Any) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

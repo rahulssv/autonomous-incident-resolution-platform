@@ -47,6 +47,10 @@ class RCAEvidenceBundle(BaseModel):
     correlation_summary: str | None = None
     service_context: dict[str, Any] = Field(default_factory=dict)
     workload_context: dict[str, Any] = Field(default_factory=dict)
+    kubernetes: dict[str, Any] = Field(default_factory=dict)
+    github: dict[str, Any] = Field(default_factory=dict)
+    dockerhub: dict[str, Any] = Field(default_factory=dict)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RCAPlan(BaseModel):
@@ -75,6 +79,7 @@ class AgentGraphState(TypedDict, total=False):
     embedding_texts: list[str]
     embedding_vectors: list[list[float]]
     evidence_ids: list[str]
+    tool_calls: list[dict[str, Any]]
     errors: list[str]
     next_action: str
     agent_events: list[dict[str, Any]]

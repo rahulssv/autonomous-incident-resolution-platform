@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     llm_remediation_model: str = "gpt-5.2-CIO"
     llm_documentation_model: str = "gpt-4.1"
     llm_embedding_model: str = "embeddings"
+    agent_read_only_evidence_enabled: bool = False
 
     client_github_org: str = "AIRP-client"
     azure_subscription_id: str = "568d5cd8-cd2c-4170-ae3e-0b93b2cc39aa"

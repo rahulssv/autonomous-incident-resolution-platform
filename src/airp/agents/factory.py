@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from airp.agents.correlation import CorrelationAgent
 from airp.agents.embedding import EmbeddingAgent
+from airp.agents.evidence import RCAEvidenceCollector
 from airp.agents.monitoring import MonitoringAgent
 from airp.agents.rca import RCAAgent
 from airp.agents.supervisor import LangGraphSupervisor
 from airp.core.config import Settings, get_settings
+from airp.integrations.dockerhub.client import DockerHubClient
 from airp.integrations.genaihub.client import GenAIHubClient
+from airp.integrations.github_mcp.client import GitHubMCPClient
+from airp.integrations.kubernetes_mcp.client import KubernetesMCPClient
 
 
 def build_default_agent_supervisor(settings: Settings | None = None) -> LangGraphSupervisor:
@@ -15,9 +19,17 @@ def build_default_agent_supervisor(settings: Settings | None = None) -> LangGrap
     if settings.gateway_base_url and settings.gateway_api_key:
         genai_client = GenAIHubClient(settings)
 
+    evidence_collector = None
+    if settings.agent_read_only_evidence_enabled:
+        evidence_collector = RCAEvidenceCollector(
+            kubernetes_client=KubernetesMCPClient(),
+            github_client=GitHubMCPClient(),
+            dockerhub_client=DockerHubClient(),
+        )
+
     return LangGraphSupervisor(
         monitoring_agent=MonitoringAgent(settings=settings, llm_client=genai_client),
         correlation_agent=CorrelationAgent(),
-        rca_agent=RCAAgent(),
+        rca_agent=RCAAgent(evidence_collector=evidence_collector),
         embedding_agent=EmbeddingAgent(settings=settings, embedder=genai_client),
     )

@@ -4,11 +4,26 @@ import pytest
 
 from airp.agents.correlation import CorrelationAgent
 from airp.agents.embedding import EmbeddingAgent
+from airp.agents.evidence import RCAEvidenceCollector
 from airp.agents.monitoring import MonitoringAgent
 from airp.agents.rca import RCAAgent
 from airp.agents.state import AgentGraphState, MonitoringAssessment
 from airp.agents.supervisor import LangGraphSupervisor
 from airp.core.config import Settings
+from airp.integrations.dockerhub.client import DockerHubClient, DockerHubImageEvidence
+from airp.integrations.github_mcp.client import (
+    GitHubChangedFileEvidence,
+    GitHubCommitEvidence,
+    GitHubEvidenceBundle,
+    GitHubMCPClient,
+)
+from airp.integrations.kubernetes_mcp.client import (
+    KubernetesEventEvidence,
+    KubernetesEvidenceBundle,
+    KubernetesLogEvidence,
+    KubernetesMCPClient,
+    KubernetesPodEvidence,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -124,6 +139,106 @@ async def test_rca_agent_builds_evidence_bundle_from_available_context() -> None
     assert "service_catalog" in update["rca_evidence_bundle"]["evidence_sources"]
     assert "runtime_workload" in update["rca_evidence_bundle"]["evidence_sources"]
     assert update["agent_events"][0]["event_type"] == "rca.started"
+
+
+async def test_rca_agent_collects_read_only_runtime_repository_and_image_evidence() -> None:
+    state = sample_state()
+    state["monitoring_assessment"] = {"summary": "Checkout alert is valid."}
+    state["correlation_result"] = {
+        "context_summary": "service=checkout-api",
+        "repository_url": "https://github.com/AIRP-client/checkout-api",
+        "docker_image": "docker.io/airpclient/checkout-api:v1",
+    }
+    state["service_context"] = {
+        "name": "checkout-api",
+        "repository_url": "https://github.com/AIRP-client/checkout-api",
+        "docker_image": "docker.io/airpclient/checkout-api:v1",
+        "namespace": "shopfast",
+        "deployment": "checkout-api",
+    }
+    state["workload_context"] = {
+        "namespace": "shopfast",
+        "deployment": "checkout-api",
+        "pod_name": "checkout-api-abc123",
+        "container_name": "api",
+        "image": "docker.io/airpclient/checkout-api:v1",
+    }
+    collector = RCAEvidenceCollector(
+        kubernetes_client=KubernetesMCPClient(
+            fixture=KubernetesEvidenceBundle(
+                namespace="shopfast",
+                pod_name="checkout-api-abc123",
+                deployment="checkout-api",
+                pods=[
+                    KubernetesPodEvidence(
+                        namespace="shopfast",
+                        name="checkout-api-abc123",
+                        restart_count=3,
+                    )
+                ],
+                logs=[
+                    KubernetesLogEvidence(
+                        namespace="shopfast",
+                        pod_name="checkout-api-abc123",
+                        container="api",
+                        lines=["token=secret-value", "timeout talking to payments"],
+                    )
+                ],
+                events=[
+                    KubernetesEventEvidence(
+                        namespace="shopfast",
+                        reason="BackOff",
+                        message="Back-off restarting failed container",
+                    )
+                ],
+            )
+        ),
+        github_client=GitHubMCPClient(
+            fixture=GitHubEvidenceBundle(
+                repository_url="https://github.com/AIRP-client/checkout-api",
+                default_branch="main",
+                commits=[
+                    GitHubCommitEvidence(
+                        sha="abc123",
+                        message="Tighten checkout timeout",
+                        changed_files=[
+                            GitHubChangedFileEvidence(
+                                path="src/checkout/client.py",
+                                status="modified",
+                            )
+                        ],
+                    )
+                ],
+            )
+        ),
+        dockerhub_client=DockerHubClient(
+            fixture={
+                "docker.io/airpclient/checkout-api:v1": DockerHubImageEvidence(
+                    image="docker.io/airpclient/checkout-api:v1",
+                    repository="airpclient/checkout-api",
+                    tag="v1",
+                    digest="sha256:abc",
+                    source_commit_sha="abc123",
+                )
+            }
+        ),
+    )
+
+    update = await RCAAgent(evidence_collector=collector)(state)
+
+    bundle = update["rca_evidence_bundle"]
+    assert "kubernetes" in bundle["evidence_sources"]
+    assert "github" in bundle["evidence_sources"]
+    assert "dockerhub" in bundle["evidence_sources"]
+    assert bundle["kubernetes"]["pods"][0]["restart_count"] == 3
+    assert "secret-value" not in bundle["kubernetes"]["logs"][0]["lines"][0]
+    assert bundle["github"]["changed_files"][0]["path"] == "src/checkout/client.py"
+    assert bundle["dockerhub"]["source_commit_sha"] == "abc123"
+    assert {call["tool_server"] for call in update["tool_calls"]} == {
+        "kubernetes_mcp",
+        "github_mcp",
+        "dockerhub",
+    }
 
 
 async def test_langgraph_supervisor_routes_monitoring_correlation_rca_then_embedding() -> None:
