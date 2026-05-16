@@ -1,8 +1,9 @@
 import json
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlparse
 
-from pydantic import AnyHttpUrl, Field, field_validator
+from pydantic import AnyHttpUrl, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -87,6 +88,28 @@ class Settings(BaseSettings):
     temporal_tls: bool = False
     temporal_start_workflows: bool = True
 
+    @model_validator(mode="after")
+    def validate_production_guardrails(self) -> "Settings":
+        if self.environment != "production":
+            return self
+
+        errors: list[str] = []
+        if not self.auth_enabled:
+            errors.append("AIRP_AUTH_ENABLED must be true in production")
+        if not self.entra_tenant_id:
+            errors.append("AIRP_ENTRA_TENANT_ID is required in production")
+        if not self.entra_client_id:
+            errors.append("AIRP_ENTRA_CLIENT_ID is required in production")
+        for origin in self.allowed_origins:
+            if not _is_explicit_https_origin(origin):
+                errors.append(
+                    "AIRP_ALLOWED_ORIGINS must contain only explicit HTTPS origins "
+                    f"in production: {origin!r}"
+                )
+        if errors:
+            raise ValueError("; ".join(errors))
+        return self
+
     @field_validator("api_prefix")
     @classmethod
     def normalize_api_prefix(cls, value: str) -> str:
@@ -102,6 +125,7 @@ class Settings(BaseSettings):
         return value
 
     @field_validator(
+        "allowed_origins",
         "kubernetes_mcp_namespace_allowlist",
         "github_mcp_repository_allowlist",
         mode="before",
@@ -136,3 +160,20 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def _is_explicit_https_origin(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped or "*" in stripped:
+        return False
+    parsed = urlparse(stripped)
+    return (
+        parsed.scheme == "https"
+        and bool(parsed.hostname)
+        and not parsed.username
+        and not parsed.password
+        and not parsed.path
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+    )

@@ -80,6 +80,13 @@ the discovery metadata and JWKS client once to tolerate Entra key rotation. If
 discovery is unavailable or malformed, protected APIs return `503` until discovery
 succeeds again.
 
+Production startup guardrails are strict when `AIRP_ENVIRONMENT=production`:
+
+- `AIRP_AUTH_ENABLED` must be `true`.
+- `AIRP_ENTRA_TENANT_ID` and `AIRP_ENTRA_CLIENT_ID` must be configured.
+- Invalid auth settings fail the API or worker process at startup instead of serving
+  traffic with a weak authentication boundary.
+
 ## 4. Configure API HTTP Hardening
 
 AIRP adds request and correlation IDs, rejects oversized request bodies, and returns
@@ -94,6 +101,10 @@ AIRP_API_MAX_REQUEST_BODY_BYTES=1048576
 The default request body limit is 1 MiB. Increase it only for a specific operational
 need, such as larger webhook payloads, and keep any upstream ingress or API gateway
 limit aligned with this setting.
+
+If `AIRP_ALLOWED_ORIGINS` is configured in production, every origin must be an
+explicit HTTPS origin such as `https://airp.example.com`. Wildcards, `http://`
+origins, paths, query strings, and `null` origins are rejected at startup.
 
 ## 5. Configure Azure Event Hubs Kafka Endpoint
 

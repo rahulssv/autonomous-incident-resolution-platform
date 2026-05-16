@@ -37,6 +37,7 @@ Already implemented:
 - Request/correlation ID middleware with response headers and CORS exposure.
 - API request body limit middleware with configurable maximum size and `413` responses for oversized requests.
 - Baseline API security response headers.
+- Production startup guardrails that require Entra auth configuration and explicit HTTPS CORS origins.
 - Generic paginated response schema and total-count pagination for incident artifact, audit, catalog, repository, workload, incident search, and incident list APIs.
 - Read-only effective policy API for disabled-by-default external actions, repository/namespace allowlists, and MCP read settings with secrets redacted.
 - Disabled-by-default external action policy flags and shared artifact idempotency helper for future GitHub, Slack, PR, and documentation writes.
@@ -83,14 +84,13 @@ Verified from the current repository on 2026-05-16:
 - Current Temporal workflow invokes a LangGraph supervisor through the `agent_graph_run` activity and persists RCA artifacts, proposed remediation plans, and documentation report drafts.
 - Current graph embedding output is persisted to `incident_embeddings`; pgvector conversion and semantic ranking remain pending.
 - Current GenAI Hub integration is used as an optional LLM/embedding adapter; RCA, Remediation, and Documentation prompt/model-call paths are implemented, while shared prompt loading and production evals are still pending.
-- Current verification baseline is `./scripts/verify.sh` with 98 passing tests.
+- Current verification baseline is `./scripts/verify.sh` with 108 passing tests.
 
 ## Remaining Work Summary
 
 The remaining product work is:
 
 - PostgreSQL/pgvector migration verification and production-grade repository/query layer.
-- Microsoft Entra ID issuer discovery, JWKS caching, app roles, and route-level authorization.
 - Live Azure Event Hubs validation, consumer metrics, and replay/dead-letter operations.
 - Temporal workflow hardening: full lifecycle states, retries, workflow replay tests, restart tests, evidence/approval/documentation queries, and external-artifact idempotency.
 - AIRP-client discovery: GitHub repositories, DockerHub public image metadata, AKS workload inventory, and repository-to-image-to-workload mapping.
@@ -186,7 +186,7 @@ Tasks:
 - [x] Add signed JWT fixtures for tests.
 - [x] Test missing, expired, wrong-audience, wrong-issuer, wrong-tenant, missing-subject, and insufficient-role tokens.
 - [x] Document Entra app registration, enforced claims, scopes, roles, and local token acquisition.
-- [ ] Fail fast in production when auth config is missing.
+- [x] Fail fast in production when auth config is missing.
 
 Acceptance criteria:
 
@@ -688,7 +688,7 @@ Tasks:
 - [ ] Add SBOM generation.
 - [x] Add request body size limits.
 - [ ] Add rate limiting for public and protected endpoints.
-- [ ] Add strict production CORS allowlist.
+- [x] Add strict production CORS allowlist.
 - [x] Add response security headers.
 - [ ] Add audit trail coverage checks.
 - [x] Add redaction before GenAI Hub chat and embedding requests.
@@ -1034,7 +1034,8 @@ Operations, security, deployment, and handoff:
 - [ ] Add Slack dependency health check.
 - [x] Add readiness behavior that degrades when required dependencies are unavailable.
 - [x] Add request body limits and security headers.
-- [ ] Add rate limiting and production CORS validation.
+- [x] Add production CORS validation.
+- [ ] Add rate limiting.
 - [ ] Add CI/CD for lint, tests, migrations, Docker build, image scanning, SBOM, Helm checks, release, deploy, and rollback.
 - [ ] Deploy API, alert consumer, and Temporal worker to Azure AKS with production auth and Kubernetes secrets.
 - [ ] Run end-to-end incident simulations for latency, crash loop, bad config, and failed deployment scenarios.
@@ -1412,17 +1413,35 @@ Verification:
 - `pytest tests/integration/test_backend_smoke.py -q` passes with 18 tests.
 - `./scripts/verify.sh` passes with 98 tests.
 
-## Immediate Next Sprint
+## Completed Sprint: Production Startup Guardrails
 
 Sprint goal: fail safely in production when security-critical HTTP or auth configuration is missing or too permissive.
 
 Tasks:
 
-1. [ ] Fail fast in production when Entra auth is enabled but tenant/client settings are missing.
-2. [ ] Fail fast in production when Entra auth is disabled.
-3. [ ] Validate production CORS origins are explicit HTTPS origins, not wildcards.
-4. [ ] Add settings tests for production auth and CORS validation.
-5. [ ] Document the production startup guardrails.
+1. [x] Fail fast in production when Entra auth is enabled but tenant/client settings are missing.
+2. [x] Fail fast in production when Entra auth is disabled.
+3. [x] Validate production CORS origins are explicit HTTPS origins, not wildcards.
+4. [x] Add settings tests for production auth and CORS validation.
+5. [x] Document the production startup guardrails.
+
+Verification:
+
+- Focused `ruff check` for touched settings, tests, and deployment docs passes.
+- `pytest tests/unit/test_settings_guardrails.py -q` passes with 10 tests.
+- `./scripts/verify.sh` passes with 108 tests.
+
+## Immediate Next Sprint
+
+Sprint goal: add first-pass API rate limiting for public and protected endpoints.
+
+Tasks:
+
+1. [ ] Add configurable API rate-limit settings.
+2. [ ] Add ASGI rate-limit middleware with deterministic client identity extraction.
+3. [ ] Return `429` with `Retry-After` and rate-limit headers when exceeded.
+4. [ ] Wire the middleware into FastAPI application creation.
+5. [ ] Add ASGI-level tests for allowed requests, exceeded limits, and disabled mode.
 
 ## Verified Remaining Critical Path
 
