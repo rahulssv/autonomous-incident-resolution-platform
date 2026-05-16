@@ -44,6 +44,7 @@ class FakeIncidentService:
     def __init__(self) -> None:
         self.existing = None
         self.created = False
+        self.payloads = []
         self.events = []
         self.attached_workflow = None
 
@@ -54,6 +55,7 @@ class FakeIncidentService:
     async def create_incident_once(self, payload: IncidentCreate, *, actor: str):
         _ = payload, actor
         self.created = True
+        self.payloads.append(payload)
         self.existing = SimpleNamespace(
             id="inc-1",
             severity=payload.severity.value,
@@ -271,6 +273,57 @@ async def test_alert_ingestion_groups_repeated_azure_kubernetes_events() -> None
             "azure-event:shopfast:checkout-api:BackOff:checkout-api-7d9c-abcde"
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_alert_ingestion_groups_azure_image_pull_events_without_workload() -> None:
+    payload_one = {
+        "records": [
+            {
+                "id": "event-1",
+                "time": "2026-05-16T00:00:00Z",
+                "properties": {
+                    "reason": "Failed",
+                    "type": "Warning",
+                    "namespace": "shopfast",
+                    "message": (
+                        'Failed to pull image "docker.io/ramnathnayak/s3-pricing:latest2": '
+                        "not found"
+                    ),
+                },
+            }
+        ]
+    }
+    payload_two = {
+        "records": [
+            {
+                "id": "event-2",
+                "time": "2026-05-16T00:01:00Z",
+                "properties": {
+                    "reason": "Failed",
+                    "type": "Warning",
+                    "namespace": "shopfast",
+                    "message": (
+                        'Failed to pull image "docker.io/ramnathnayak/s3-pricing:latest2": '
+                        "not found"
+                    ),
+                },
+            }
+        ]
+    }
+    incidents = FakeIncidentService()
+    service = AlertIngestionService(FakeSession(), InMemoryDedupeStore())
+    service.incidents = incidents
+
+    first = await service.ingest_alertmanager_payload(payload_one)
+    second = await service.ingest_alertmanager_payload(payload_two)
+
+    assert first.created_incident_ids == ["inc-1"]
+    assert second.created_incident_ids == []
+    assert second.duplicate_keys == [incidents.payloads[0].idempotency_key]
+    assert incidents.payloads[0].metadata["service"] == "s3-pricing"
+    assert incidents.payloads[0].image_tag == "docker.io/ramnathnayak/s3-pricing:latest2"
+    assert len(incidents.payloads[0].idempotency_key) <= 160
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -9,6 +10,16 @@ from pydantic import BaseModel, Field
 
 from airp.domain.enums import IncidentSeverity
 from airp.schemas.incidents import IncidentCreate
+
+_QUOTED_IMAGE_RE = re.compile(
+    r'(?:image|reference)\s+"(?P<image>[^"]+)"',
+    flags=re.IGNORECASE,
+)
+_CONTAINER_IMAGE_RE = re.compile(
+    r"\b(?P<image>(?:[a-zA-Z0-9.-]+(?::\d+)?/)?"
+    r"[a-zA-Z0-9._-]+/[a-zA-Z0-9._/-]+"
+    r"(?::[a-zA-Z0-9._-]+)?(?:@[A-Za-z0-9_:+.-]+)?)\b"
+)
 
 
 class NormalizedAlert(BaseModel):
@@ -20,6 +31,8 @@ class NormalizedAlert(BaseModel):
     namespace: str | None = None
     pod_name: str | None = None
     deployment: str | None = None
+    image_tag: str | None = None
+    image_digest: str | None = None
     starts_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     ends_at: datetime | None = None
     fingerprint: str | None = None
@@ -53,11 +66,15 @@ class NormalizedAlert(BaseModel):
             correlation_id=self.dedupe_key,
             namespace=self.namespace,
             pod_name=self.pod_name,
+            image_tag=self.image_tag,
+            image_digest=self.image_digest,
             metadata={
                 "source": self.source,
                 "alert_name": self.alert_name,
                 "status": self.status,
                 "service": self.service,
+                "image_tag": self.image_tag,
+                "image_digest": self.image_digest,
                 "dedupe_key": self.dedupe_key,
                 "deployment": self.deployment,
                 "starts_at": self.starts_at.isoformat(),
@@ -240,6 +257,8 @@ def _normalize_azure_event_record(record: dict[str, Any]) -> list[NormalizedAler
     involved_kind = _first_present(involved, "kind") if involved else None
     severity_text = _first_present(body, "severity", "level", "type")
     message = _first_present(body, "message", "Message", "description", "summary")
+    image_tag = _container_image_from_event(body, message)
+    image_service = _repo_name_from_container_image(image_tag)
     if not any((event_type, reason, event_kind, involved_kind, severity_text, message)):
         return []
     namespace = (
@@ -270,6 +289,7 @@ def _normalize_azure_event_record(record: dict[str, Any]) -> list[NormalizedAler
         or _first_present(dimensions, "service", "app", "container")
         or deployment
         or _service_from_workload_name(pod_name)
+        or image_service
         or _resource_name_from_id(_first_present(record, "resourceId", "resourceUri", "subject"))
         or "azure-event"
     )
@@ -288,6 +308,8 @@ def _normalize_azure_event_record(record: dict[str, Any]) -> list[NormalizedAler
         namespace=namespace,
         pod_name=pod_name,
         deployment=deployment,
+        image_tag=image_tag,
+        message=description,
     ) or _first_present(record, "id", "correlationId", "operationId") or _stable_hash(record)
     status = _status_from_azure_condition(
         _first_present(body, "status", "monitorCondition", "type")
@@ -303,6 +325,7 @@ def _normalize_azure_event_record(record: dict[str, Any]) -> list[NormalizedAler
             namespace=namespace,
             pod_name=pod_name,
             deployment=deployment,
+            image_tag=image_tag,
             starts_at=occurred_at or datetime.now(UTC),
             fingerprint=fingerprint,
             generator_url=_first_present(record, "resourceId", "resourceUri", "subject"),
@@ -312,6 +335,7 @@ def _normalize_azure_event_record(record: dict[str, Any]) -> list[NormalizedAler
                 "azure_event_type": event_type,
                 "reason": reason,
                 "kind": event_kind or involved_kind,
+                "image": image_tag,
                 **{key: value for key, value in dimensions.items() if isinstance(value, str)},
             },
             annotations={"summary": f"{alert_name} on {service}", "description": description},
@@ -390,6 +414,39 @@ def _service_from_workload_name(value: str | None) -> str | None:
     return value
 
 
+def _container_image_from_event(body: dict[str, Any], message: str | None) -> str | None:
+    explicit = _first_present(
+        body,
+        "image",
+        "imageName",
+        "containerImage",
+        "container_image",
+        "image_tag",
+    )
+    if explicit:
+        return explicit.strip().strip('"')
+    if not message:
+        return None
+    quoted = _QUOTED_IMAGE_RE.search(message)
+    if quoted:
+        return quoted.group("image").strip()
+    match = _CONTAINER_IMAGE_RE.search(message)
+    if match:
+        return match.group("image").strip()
+    return None
+
+
+def _repo_name_from_container_image(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.split("@", 1)[0].strip("/")
+    if "/" in normalized:
+        normalized = normalized.rsplit("/", 1)[1]
+    if ":" in normalized:
+        normalized = normalized.split(":", 1)[0]
+    return normalized or None
+
+
 def _azure_event_fingerprint(
     *,
     alert_name: str,
@@ -397,8 +454,14 @@ def _azure_event_fingerprint(
     namespace: str | None,
     pod_name: str | None,
     deployment: str | None,
+    image_tag: str | None,
+    message: str | None,
 ) -> str | None:
     workload = deployment or pod_name
+    if not workload and image_tag:
+        workload = f"image:{_stable_hash(image_tag)[:16]}"
+    if not workload and message:
+        workload = f"message:{_stable_hash(message)[:16]}"
     if not workload:
         return None
     return ":".join(

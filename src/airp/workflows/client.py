@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import timedelta
 from typing import Protocol
 
@@ -56,13 +56,14 @@ class TemporalIncidentWorkflowStarter:
     ) -> WorkflowStartResult:
         client = await self._get_client()
         workflow_id = f"airp-incident-{incident_id}"
+        workflow_input = IncidentWorkflowInput(
+            incident_id=incident_id,
+            severity=severity,
+            correlation_id=correlation_id,
+        )
         handle = await client.start_workflow(
             IncidentWorkflow.run,
-            IncidentWorkflowInput(
-                incident_id=incident_id,
-                severity=severity,
-                correlation_id=correlation_id,
-            ),
+            asdict(workflow_input),
             id=workflow_id,
             task_queue=self.settings.temporal_task_queue,
             task_timeout=timedelta(seconds=self.settings.temporal_workflow_task_timeout_seconds),

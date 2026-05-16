@@ -4,7 +4,7 @@ import asyncio
 import signal
 from concurrent.futures import ThreadPoolExecutor
 
-from temporalio.worker import Worker
+from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from airp.core.config import get_settings
 from airp.core.logging import configure_logging, get_logger
@@ -17,7 +17,7 @@ from airp.workflows.activities import (
     incident_update_status,
 )
 from airp.workflows.client import get_temporal_client
-from airp.workflows.incident import IncidentWorkflow
+from airp.workflows.incident import LIGHT_ACTIVITY_TASK_QUEUE, IncidentWorkflow
 
 logger = get_logger(__name__)
 
@@ -30,6 +30,7 @@ async def _run() -> None:
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[IncidentWorkflow],
+        workflow_runner=UnsandboxedWorkflowRunner(),
         activities=[
             incident_update_status,
             incident_record_workflow_event,
@@ -48,6 +49,20 @@ async def _run() -> None:
         max_concurrent_activity_task_polls=settings.temporal_worker_max_activity_task_polls,
         max_activities_per_second=settings.temporal_worker_max_activities_per_second,
     )
+    light_worker = Worker(
+        client,
+        task_queue=LIGHT_ACTIVITY_TASK_QUEUE,
+        activities=[
+            incident_update_status,
+            incident_record_workflow_event,
+            incident_create_github_issue,
+            incident_send_slack_notification,
+            incident_create_remediation_pr,
+        ],
+        max_concurrent_activities=4,
+        max_concurrent_activity_task_polls=2,
+        max_activities_per_second=4.0,
+    )
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -64,14 +79,17 @@ async def _run() -> None:
         max_activity_task_polls=settings.temporal_worker_max_activity_task_polls,
         max_activities_per_second=settings.temporal_worker_max_activities_per_second,
         activity_executor_threads=settings.temporal_worker_activity_executor_threads,
+        light_activity_task_queue=LIGHT_ACTIVITY_TASK_QUEUE,
     )
-    worker_task = asyncio.create_task(worker.run())
+    worker_tasks = [
+        asyncio.create_task(worker.run()),
+        asyncio.create_task(light_worker.run()),
+    ]
     await stop_event.wait()
-    worker_task.cancel()
-    try:
-        await worker_task
-    except asyncio.CancelledError:
-        logger.info("temporal_worker_stopped")
+    for worker_task in worker_tasks:
+        worker_task.cancel()
+    await asyncio.gather(*worker_tasks, return_exceptions=True)
+    logger.info("temporal_worker_stopped")
 
 
 def main() -> None:

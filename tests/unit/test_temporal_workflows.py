@@ -7,7 +7,7 @@ from airp.workflows.client import TemporalIncidentWorkflowStarter
 from airp.workflows.incident import (
     AGENT_GRAPH_ACTIVITY_TIMEOUT,
     AGENT_GRAPH_RETRY_POLICY,
-    IncidentWorkflowInput,
+    _workflow_input_from_payload,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -60,12 +60,32 @@ async def test_temporal_starter_uses_stable_incident_workflow_id() -> None:
     )
 
     _, arg, kwargs = client.started[0]
-    assert isinstance(arg, IncidentWorkflowInput)
+    assert arg == {
+        "incident_id": "inc-123",
+        "severity": "critical",
+        "correlation_id": "corr-1",
+        "source": "alert-ingestion",
+    }
     assert kwargs["id"] == "airp-incident-inc-123"
     assert kwargs["task_queue"] == "test-task-queue"
     assert kwargs["task_timeout"].total_seconds() == 60
     assert result.workflow_id == "airp-incident-inc-123"
     assert result.workflow_run_id == "run-123"
+
+
+async def test_workflow_input_accepts_plain_json_payload() -> None:
+    payload = _workflow_input_from_payload(
+        {
+            "incident_id": "inc-123",
+            "severity": "critical",
+            "correlation_id": "corr-1",
+            "source": "alert-ingestion",
+        }
+    )
+
+    assert payload.incident_id == "inc-123"
+    assert payload.severity == "critical"
+    assert payload.correlation_id == "corr-1"
 
 
 async def test_agent_graph_activity_has_dedicated_retry_settings() -> None:

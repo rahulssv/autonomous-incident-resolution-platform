@@ -11,6 +11,7 @@ from airp.domain.enums import IncidentStatus
 
 ACTIVITY_TIMEOUT = timedelta(seconds=30)
 EXTERNAL_ACTION_ACTIVITY_TIMEOUT = timedelta(seconds=90)
+LIGHT_ACTIVITY_TASK_QUEUE = "airp-light-activities"
 ACTIVITY_RETRY_POLICY = RetryPolicy(
     initial_interval=timedelta(seconds=1),
     maximum_interval=timedelta(seconds=10),
@@ -52,6 +53,14 @@ class WorkflowSignal:
     payload: dict[str, Any] = field(default_factory=dict)
 
 
+def _workflow_input_from_payload(payload: Any) -> IncidentWorkflowInput:
+    if isinstance(payload, IncidentWorkflowInput):
+        return payload
+    if isinstance(payload, dict):
+        return IncidentWorkflowInput(**payload)
+    raise TypeError(f"Unsupported incident workflow payload type: {type(payload)!r}")
+
+
 @workflow.defn
 class IncidentWorkflow:
     def __init__(self) -> None:
@@ -59,18 +68,19 @@ class IncidentWorkflow:
         self._signals: list[WorkflowSignal] = []
 
     @workflow.run
-    async def run(self, payload: IncidentWorkflowInput) -> IncidentWorkflowState:
+    async def run(self, payload: Any) -> IncidentWorkflowState:
+        workflow_input = _workflow_input_from_payload(payload)
         self.state = IncidentWorkflowState(
-            incident_id=payload.incident_id,
+            incident_id=workflow_input.incident_id,
             status=IncidentStatus.RECEIVED.value,
             current_step="received",
-            severity=payload.severity,
-            correlation_id=payload.correlation_id,
+            severity=workflow_input.severity,
+            correlation_id=workflow_input.correlation_id,
         )
         await self._update_status(
             IncidentStatus.VALIDATED.value,
             reason="Incident workflow started from validated alert.",
-            payload={"source": payload.source},
+            payload={"source": workflow_input.source},
         )
         self.state.status = IncidentStatus.VALIDATED.value
         self.state.current_step = "validated"
@@ -247,6 +257,7 @@ class IncidentWorkflow:
                 reason,
                 payload,
             ],
+            task_queue=LIGHT_ACTIVITY_TASK_QUEUE,
             start_to_close_timeout=ACTIVITY_TIMEOUT,
             retry_policy=ACTIVITY_RETRY_POLICY,
         )
@@ -269,6 +280,7 @@ class IncidentWorkflow:
         await workflow.execute_activity(
             "incident_record_workflow_event",
             args=[self.state.incident_id, event_type, payload],
+            task_queue=LIGHT_ACTIVITY_TASK_QUEUE,
             start_to_close_timeout=ACTIVITY_TIMEOUT,
             retry_policy=ACTIVITY_RETRY_POLICY,
         )
@@ -289,6 +301,7 @@ class IncidentWorkflow:
         result = await workflow.execute_activity(
             "incident_create_github_issue",
             args=[self.state.incident_id],
+            task_queue=LIGHT_ACTIVITY_TASK_QUEUE,
             start_to_close_timeout=EXTERNAL_ACTION_ACTIVITY_TIMEOUT,
             retry_policy=ACTIVITY_RETRY_POLICY,
         )
@@ -300,6 +313,7 @@ class IncidentWorkflow:
         result = await workflow.execute_activity(
             "incident_send_slack_notification",
             args=[self.state.incident_id],
+            task_queue=LIGHT_ACTIVITY_TASK_QUEUE,
             start_to_close_timeout=EXTERNAL_ACTION_ACTIVITY_TIMEOUT,
             retry_policy=ACTIVITY_RETRY_POLICY,
         )
@@ -311,6 +325,7 @@ class IncidentWorkflow:
         result = await workflow.execute_activity(
             "incident_create_remediation_pr",
             args=[self.state.incident_id],
+            task_queue=LIGHT_ACTIVITY_TASK_QUEUE,
             start_to_close_timeout=EXTERNAL_ACTION_ACTIVITY_TIMEOUT,
             retry_policy=ACTIVITY_RETRY_POLICY,
         )
