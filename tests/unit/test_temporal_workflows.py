@@ -63,6 +63,7 @@ async def test_temporal_starter_uses_stable_incident_workflow_id() -> None:
     assert isinstance(arg, IncidentWorkflowInput)
     assert kwargs["id"] == "airp-incident-inc-123"
     assert kwargs["task_queue"] == "test-task-queue"
+    assert kwargs["task_timeout"].total_seconds() == 60
     assert result.workflow_id == "airp-incident-inc-123"
     assert result.workflow_run_id == "run-123"
 

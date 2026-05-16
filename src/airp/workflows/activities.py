@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 from temporalio import activity
 
 from airp.agents.factory import build_default_agent_supervisor
@@ -68,41 +71,55 @@ async def incident_record_workflow_event(
 
 
 @activity.defn(name="agent_graph_run")
-async def agent_graph_run(incident_id: str, workflow_id: str | None = None) -> None:
-    async with AsyncSessionLocal() as session:
-        service = IncidentService(session)
-        incident = await service.get_incident(incident_id)
-        service_context = await _service_context(session, incident.service_id)
-        workload_context = await _workload_context(
-            session,
-            service_id=incident.service_id,
-            namespace=incident.namespace,
-            pod_name=incident.pod_name,
-        )
+def agent_graph_run(incident_id: str, workflow_id: str | None = None) -> None:
+    asyncio.run(_agent_graph_run_async(incident_id, workflow_id))
 
-        supervisor = build_default_agent_supervisor()
-        state = await supervisor.run(
-            incident_id=incident.id,
-            workflow_id=workflow_id,
-            title=incident.title,
-            description=incident.description,
-            severity=incident.severity,
-            status=incident.status,
-            correlation_id=incident.correlation_id,
-            service_context=service_context,
-            workload_context=workload_context,
-        )
 
-        for event in state.get("agent_events", []):
-            await service.add_event(
-                incident_id,
-                IncidentEventCreate(
-                    event_type=event["event_type"],
-                    producer=f"langgraph.{event['agent']}",
-                    payload=event["payload"],
-                ),
+async def _agent_graph_run_async(incident_id: str, workflow_id: str | None = None) -> None:
+    settings = get_settings()
+    engine = create_async_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        poolclass=NullPool,
+    )
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with session_factory() as session:
+            service = IncidentService(session)
+            incident = await service.get_incident(incident_id)
+            service_context = await _service_context(session, incident.service_id)
+            workload_context = await _workload_context(
+                session,
+                service_id=incident.service_id,
+                namespace=incident.namespace,
+                pod_name=incident.pod_name,
             )
-        await _persist_rca_outputs(service, incident_id, state)
+
+            supervisor = build_default_agent_supervisor(settings)
+            state = await supervisor.run(
+                incident_id=incident.id,
+                workflow_id=workflow_id,
+                title=incident.title,
+                description=incident.description,
+                severity=incident.severity,
+                status=incident.status,
+                correlation_id=incident.correlation_id,
+                service_context=service_context,
+                workload_context=workload_context,
+            )
+
+            for event in state.get("agent_events", []):
+                await service.add_event(
+                    incident_id,
+                    IncidentEventCreate(
+                        event_type=event["event_type"],
+                        producer=f"langgraph.{event['agent']}",
+                        payload=event["payload"],
+                    ),
+                )
+            await _persist_rca_outputs(service, incident_id, state)
+    finally:
+        await engine.dispose()
 
 
 @activity.defn(name="incident_create_github_issue")

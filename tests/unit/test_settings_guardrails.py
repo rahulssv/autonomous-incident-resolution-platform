@@ -85,8 +85,10 @@ def test_allowed_origins_accept_comma_separated_environment_style_value() -> Non
 def test_temporal_worker_concurrency_defaults_are_bounded() -> None:
     settings = Settings()
 
+    assert settings.temporal_workflow_task_timeout_seconds == 60
     assert settings.temporal_worker_max_concurrent_workflow_tasks == 2
-    assert settings.temporal_worker_max_concurrent_activities == 2
+    assert settings.temporal_worker_max_concurrent_activities == 1
     assert settings.temporal_worker_max_workflow_task_polls == 2
     assert settings.temporal_worker_max_activity_task_polls == 1
-    assert settings.temporal_worker_max_activities_per_second == 1.0
+    assert settings.temporal_worker_max_activities_per_second == 0.5
+    assert settings.temporal_worker_activity_executor_threads == 2

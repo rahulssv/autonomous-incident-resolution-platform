@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
+from concurrent.futures import ThreadPoolExecutor
 
 from temporalio.worker import Worker
 
@@ -37,6 +38,10 @@ async def _run() -> None:
             incident_send_slack_notification,
             incident_create_remediation_pr,
         ],
+        activity_executor=ThreadPoolExecutor(
+            max_workers=settings.temporal_worker_activity_executor_threads,
+            thread_name_prefix="airp-activity",
+        ),
         max_concurrent_workflow_tasks=settings.temporal_worker_max_concurrent_workflow_tasks,
         max_concurrent_activities=settings.temporal_worker_max_concurrent_activities,
         max_concurrent_workflow_task_polls=settings.temporal_worker_max_workflow_task_polls,
@@ -58,6 +63,7 @@ async def _run() -> None:
         max_workflow_task_polls=settings.temporal_worker_max_workflow_task_polls,
         max_activity_task_polls=settings.temporal_worker_max_activity_task_polls,
         max_activities_per_second=settings.temporal_worker_max_activities_per_second,
+        activity_executor_threads=settings.temporal_worker_activity_executor_threads,
     )
     worker_task = asyncio.create_task(worker.run())
     await stop_event.wait()

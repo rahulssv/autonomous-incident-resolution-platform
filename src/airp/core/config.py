@@ -102,11 +102,13 @@ class Settings(BaseSettings):
     temporal_task_queue: str = "airp-incident-workflows"
     temporal_tls: bool = False
     temporal_start_workflows: bool = True
+    temporal_workflow_task_timeout_seconds: int = Field(default=60, ge=10, le=600)
     temporal_worker_max_concurrent_workflow_tasks: int = Field(default=2, ge=1, le=100)
-    temporal_worker_max_concurrent_activities: int = Field(default=2, ge=1, le=100)
+    temporal_worker_max_concurrent_activities: int = Field(default=1, ge=1, le=100)
     temporal_worker_max_workflow_task_polls: int = Field(default=2, ge=2, le=20)
     temporal_worker_max_activity_task_polls: int = Field(default=1, ge=1, le=20)
-    temporal_worker_max_activities_per_second: float = Field(default=1.0, gt=0.0, le=100.0)
+    temporal_worker_max_activities_per_second: float = Field(default=0.5, gt=0.0, le=100.0)
+    temporal_worker_activity_executor_threads: int = Field(default=2, ge=1, le=20)
 
     @model_validator(mode="after")
     def validate_production_guardrails(self) -> "Settings":

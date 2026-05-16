@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Protocol
 
 from temporalio.client import Client
@@ -64,6 +65,7 @@ class TemporalIncidentWorkflowStarter:
             ),
             id=workflow_id,
             task_queue=self.settings.temporal_task_queue,
+            task_timeout=timedelta(seconds=self.settings.temporal_workflow_task_timeout_seconds),
             id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
             id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
         )
