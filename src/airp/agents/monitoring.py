@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
+from pydantic import ValidationError
+
 from airp.agents.state import AgentEvent, AgentGraphState, MonitoringAssessment
 from airp.core.config import Settings, get_settings
 from airp.domain.enums import IncidentSeverity
@@ -48,28 +50,45 @@ class MonitoringAgent:
 
     async def assess(self, state: AgentGraphState) -> MonitoringAssessment:
         if self.llm_client is not None:
-            return self.llm_client.structured_chat(
-                model=self.settings.llm_monitoring_model,
-                messages=self._messages(state),
-                response_model=MonitoringAssessment,
-                temperature=0.0,
-                request_id=state.get("correlation_id") or state.get("incident_id"),
-            )
+            try:
+                return self.llm_client.structured_chat(
+                    model=self.settings.llm_monitoring_model,
+                    messages=self._messages(state),
+                    response_model=MonitoringAssessment,
+                    temperature=0.0,
+                    request_id=state.get("correlation_id") or state.get("incident_id"),
+                )
+            except (ValidationError, json.JSONDecodeError, ValueError):
+                return self._deterministic_assessment(
+                    state,
+                    reason="LLM monitoring output did not match the required schema.",
+                )
         return self._deterministic_assessment(state)
 
     def _messages(self, state: AgentGraphState) -> list[dict[str, Any]]:
+        response_schema = {
+            "valid_alert": "boolean",
+            "severity": "one of: info, warning, critical",
+            "affected_service": "string or null",
+            "noise_risk": "one of: low, medium, high",
+            "recommended_next_agent": "one of: correlation, rca, escalate",
+            "summary": "string",
+            "confidence": "number between 0 and 1",
+        }
         return [
             {
                 "role": "system",
                 "content": (
                     "You are the AIRP Monitoring Agent. Validate incident alerts and return "
-                    "only JSON matching the provided schema. Do not invent evidence."
+                    "only a single JSON object matching the required schema. Do not wrap the "
+                    "JSON in prose or markdown. Do not invent evidence."
                 ),
             },
             {
                 "role": "user",
                 "content": json.dumps(
                     {
+                        "required_response_schema": response_schema,
                         "incident_id": state.get("incident_id"),
                         "title": state.get("title"),
                         "description": state.get("description"),
@@ -81,8 +100,16 @@ class MonitoringAgent:
             },
         ]
 
-    def _deterministic_assessment(self, state: AgentGraphState) -> MonitoringAssessment:
+    def _deterministic_assessment(
+        self,
+        state: AgentGraphState,
+        *,
+        reason: str | None = None,
+    ) -> MonitoringAssessment:
         severity = self._severity(state.get("severity"))
+        summary = f"Incident {state.get('incident_id')} accepted for {severity} processing."
+        if reason:
+            summary = f"{summary} {reason}"
         return MonitoringAssessment(
             valid_alert=True,
             severity=severity,
@@ -91,7 +118,7 @@ class MonitoringAgent:
             recommended_next_agent=(
                 "rca" if severity == IncidentSeverity.CRITICAL.value else "correlation"
             ),
-            summary=f"Incident {state.get('incident_id')} accepted for {severity} processing.",
+            summary=summary,
             confidence=0.65,
         )
 
