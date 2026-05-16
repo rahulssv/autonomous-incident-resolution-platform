@@ -96,8 +96,10 @@ def _first_present(values: dict[str, Any], *keys: str) -> str | None:
 
 def normalize_alertmanager_payload(payload: dict[str, Any]) -> list[NormalizedAlert]:
     alerts = payload.get("alerts")
-    if not isinstance(alerts, list) or not alerts:
+    if "alerts" not in payload:
         return _normalize_non_alertmanager_payload(payload)
+    if not isinstance(alerts, list) or not alerts:
+        raise ValueError("Alertmanager payload must contain a non-empty alerts list")
 
     normalized_alerts: list[NormalizedAlert] = []
     for raw_alert in alerts:

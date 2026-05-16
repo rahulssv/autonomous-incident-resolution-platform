@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     kafka_deadletter_topic: str = "airp.deadletter"
     kafka_alert_consumer_group: str = "airp-alert-consumer"
     kafka_auto_offset_reset: Literal["earliest", "latest"] = "earliest"
+    kafka_consumer_poll_timeout_seconds: float = Field(default=1.0, gt=0.0, le=30.0)
+    kafka_consumer_idle_log_seconds: int = Field(default=30, ge=0, le=3600)
+    kafka_consumer_session_timeout_ms: int = Field(default=30_000, ge=6_000, le=300_000)
+    kafka_consumer_heartbeat_interval_ms: int = Field(default=10_000, ge=1_000, le=60_000)
+    kafka_consumer_max_poll_interval_ms: int = Field(default=300_000, ge=30_000, le=3_600_000)
     alert_dedupe_ttl_seconds: int = 3600
 
     temporal_address: str = "localhost:7233"
@@ -97,6 +102,11 @@ class Settings(BaseSettings):
     temporal_task_queue: str = "airp-incident-workflows"
     temporal_tls: bool = False
     temporal_start_workflows: bool = True
+    temporal_worker_max_concurrent_workflow_tasks: int = Field(default=2, ge=1, le=100)
+    temporal_worker_max_concurrent_activities: int = Field(default=2, ge=1, le=100)
+    temporal_worker_max_workflow_task_polls: int = Field(default=2, ge=2, le=20)
+    temporal_worker_max_activity_task_polls: int = Field(default=1, ge=1, le=20)
+    temporal_worker_max_activities_per_second: float = Field(default=1.0, gt=0.0, le=100.0)
 
     @model_validator(mode="after")
     def validate_production_guardrails(self) -> "Settings":

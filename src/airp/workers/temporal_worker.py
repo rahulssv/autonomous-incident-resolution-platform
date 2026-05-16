@@ -37,6 +37,11 @@ async def _run() -> None:
             incident_send_slack_notification,
             incident_create_remediation_pr,
         ],
+        max_concurrent_workflow_tasks=settings.temporal_worker_max_concurrent_workflow_tasks,
+        max_concurrent_activities=settings.temporal_worker_max_concurrent_activities,
+        max_concurrent_workflow_task_polls=settings.temporal_worker_max_workflow_task_polls,
+        max_concurrent_activity_task_polls=settings.temporal_worker_max_activity_task_polls,
+        max_activities_per_second=settings.temporal_worker_max_activities_per_second,
     )
 
     stop_event = asyncio.Event()
@@ -48,6 +53,11 @@ async def _run() -> None:
         "temporal_worker_started",
         namespace=settings.temporal_namespace,
         task_queue=settings.temporal_task_queue,
+        max_concurrent_workflow_tasks=settings.temporal_worker_max_concurrent_workflow_tasks,
+        max_concurrent_activities=settings.temporal_worker_max_concurrent_activities,
+        max_workflow_task_polls=settings.temporal_worker_max_workflow_task_polls,
+        max_activity_task_polls=settings.temporal_worker_max_activity_task_polls,
+        max_activities_per_second=settings.temporal_worker_max_activities_per_second,
     )
     worker_task = asyncio.create_task(worker.run())
     await stop_event.wait()

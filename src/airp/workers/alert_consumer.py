@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import signal
+import time
 from dataclasses import dataclass
 from typing import Any
 
-from confluent_kafka import KafkaError, Message
+from confluent_kafka import Consumer, KafkaError, Message, TopicPartition
 from pydantic import ValidationError
 
 from airp.core.config import Settings, get_settings
@@ -35,6 +36,8 @@ class AlertConsumerWorker:
             self.settings.kafka_alert_consumer_group,
             [self.settings.kafka_alerts_raw_topic],
             self.settings,
+            on_assign=self._on_assign,
+            on_revoke=self._on_revoke,
         )
         self.producer = build_producer(self.settings)
         self.workflow_starter = (
@@ -43,6 +46,10 @@ class AlertConsumerWorker:
             else None
         )
         self._running = True
+        self._empty_polls = 0
+        self._processed_messages = 0
+        self._last_message_at = time.monotonic()
+        self._last_idle_log_at = time.monotonic()
 
     async def process_message_value(self, value: bytes | str) -> ProcessedMessage:
         payload = self._decode_payload(value)
@@ -64,6 +71,9 @@ class AlertConsumerWorker:
             result = await self.process_message_value(message.value())
             logger.info(
                 "alert_message_processed",
+                topic=message.topic(),
+                partition=message.partition(),
+                offset=message.offset(),
                 normalized_count=result.normalized_count,
                 created_incident_ids=result.created_incident_ids,
                 duplicate_count=len(result.duplicate_keys),
@@ -79,25 +89,79 @@ class AlertConsumerWorker:
             "alert_consumer_started",
             topic=self.settings.kafka_alerts_raw_topic,
             group_id=self.settings.kafka_alert_consumer_group,
+            auto_offset_reset=self.settings.kafka_auto_offset_reset,
+            poll_timeout_seconds=self.settings.kafka_consumer_poll_timeout_seconds,
+            idle_log_seconds=self.settings.kafka_consumer_idle_log_seconds,
         )
         try:
             while self._running:
-                message = self.consumer.poll(1.0)
+                message = self.consumer.poll(self.settings.kafka_consumer_poll_timeout_seconds)
                 if message is None:
+                    self._empty_polls += 1
+                    self._log_idle_polling_if_due()
                     await asyncio.sleep(0)
                     continue
                 if message.error():
                     if message.error().code() != KafkaError._PARTITION_EOF:
-                        logger.error("kafka_consumer_error", error=str(message.error()))
+                        logger.error(
+                            "kafka_consumer_error",
+                            error=str(message.error()),
+                            code=message.error().code(),
+                            topic=message.topic(),
+                            partition=message.partition(),
+                            offset=message.offset(),
+                        )
                     continue
+                self._empty_polls = 0
+                self._last_message_at = time.monotonic()
+                self._processed_messages += 1
                 await self.process_message(message)
         finally:
             self.consumer.close()
             self.producer.flush(5)
-            logger.info("alert_consumer_stopped")
+            logger.info("alert_consumer_stopped", processed_messages=self._processed_messages)
 
     def stop(self) -> None:
         self._running = False
+
+    def _log_idle_polling_if_due(self) -> None:
+        if self.settings.kafka_consumer_idle_log_seconds <= 0:
+            return
+        now = time.monotonic()
+        if now - self._last_idle_log_at < self.settings.kafka_consumer_idle_log_seconds:
+            return
+        self._last_idle_log_at = now
+        logger.info(
+            "alert_consumer_polling",
+            topic=self.settings.kafka_alerts_raw_topic,
+            group_id=self.settings.kafka_alert_consumer_group,
+            idle_seconds=round(now - self._last_message_at, 3),
+            empty_polls=self._empty_polls,
+            processed_messages=self._processed_messages,
+        )
+
+    @staticmethod
+    def _format_partitions(partitions: list[TopicPartition]) -> list[str]:
+        return [
+            f"{partition.topic}[{partition.partition}]@{partition.offset}"
+            for partition in partitions
+        ]
+
+    def _on_assign(self, _consumer: Consumer, partitions: list[TopicPartition]) -> None:
+        logger.info(
+            "kafka_partitions_assigned",
+            topic=self.settings.kafka_alerts_raw_topic,
+            group_id=self.settings.kafka_alert_consumer_group,
+            partitions=self._format_partitions(partitions),
+        )
+
+    def _on_revoke(self, _consumer: Consumer, partitions: list[TopicPartition]) -> None:
+        logger.info(
+            "kafka_partitions_revoked",
+            topic=self.settings.kafka_alerts_raw_topic,
+            group_id=self.settings.kafka_alert_consumer_group,
+            partitions=self._format_partitions(partitions),
+        )
 
     def _publish_deadletter(self, message: Message, exc: Exception) -> None:
         failed_event = {
