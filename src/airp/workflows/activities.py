@@ -11,7 +11,13 @@ from airp.agents.factory import build_default_agent_supervisor
 from airp.db.models.catalog import RuntimeWorkload, ServiceCatalog
 from airp.db.session import AsyncSessionLocal
 from airp.domain.enums import IncidentStatus
-from airp.schemas.incidents import EvidenceItemCreate, IncidentEventCreate, IncidentSignal
+from airp.schemas.incidents import (
+    EvidenceItemCreate,
+    IncidentEventCreate,
+    IncidentSignal,
+    ModelCallCreate,
+    RCAHypothesisCreate,
+)
 from airp.services.incident_service import IncidentService
 
 
@@ -93,6 +99,7 @@ async def _persist_rca_outputs(
     service: IncidentService, incident_id: str, state: dict[str, Any]
 ) -> None:
     evidence_ids = []
+    evidence_ids_by_type: dict[str, str] = {}
     bundle = state.get("rca_evidence_bundle") or {}
 
     for evidence_type in ("kubernetes", "github", "dockerhub"):
@@ -111,6 +118,7 @@ async def _persist_rca_outputs(
             ),
         )
         evidence_ids.append(evidence.id)
+        evidence_ids_by_type[evidence_type] = evidence.id
 
     for tool_call in _unique_tool_calls(
         [*bundle.get("tool_calls", []), *state.get("tool_calls", [])]
@@ -128,13 +136,64 @@ async def _persist_rca_outputs(
             error=tool_call.get("error"),
         )
 
+    for model_call in state.get("model_calls", []):
+        await service.add_model_call(
+            incident_id,
+            ModelCallCreate(
+                model_name=model_call.get("model_name", "unknown"),
+                prompt_template_version=model_call.get("prompt_template_version"),
+                prompt_tokens=model_call.get("prompt_tokens"),
+                completion_tokens=model_call.get("completion_tokens"),
+                latency_ms=model_call.get("latency_ms"),
+                response_hash=model_call.get("response_hash"),
+                validation_result=model_call.get("validation_result") or {},
+            ),
+        )
+
+    hypothesis_ids = []
+    model_name = _rca_model_name(state)
+    for hypothesis in state.get("rca_hypotheses", []):
+        supporting_evidence = _supporting_evidence_payload(
+            hypothesis,
+            evidence_ids_by_type,
+        )
+        stored = await service.add_rca_hypothesis(
+            incident_id,
+            RCAHypothesisCreate(
+                rank=hypothesis.get("rank", 1),
+                hypothesis=hypothesis.get("hypothesis", "RCA hypothesis unavailable."),
+                confidence=hypothesis.get("confidence", 0.0),
+                supporting_evidence=supporting_evidence,
+                contradicting_evidence={
+                    "items": hypothesis.get("contradictions", []),
+                },
+                model_name=model_name,
+            ),
+        )
+        hypothesis_ids.append(stored.id)
+
     if evidence_ids:
+        bundle_with_ids = dict(bundle)
+        bundle_with_ids["evidence_item_ids"] = evidence_ids_by_type
         await service.add_event(
             incident_id,
             IncidentEventCreate(
                 event_type="rca.evidence.persisted",
                 producer="langgraph.rca",
-                payload={"evidence_ids": evidence_ids},
+                payload={
+                    "evidence_ids": evidence_ids,
+                    "evidence_ids_by_type": evidence_ids_by_type,
+                    "evidence_bundle": bundle_with_ids,
+                },
+            ),
+        )
+    if hypothesis_ids:
+        await service.add_event(
+            incident_id,
+            IncidentEventCreate(
+                event_type="rca.hypotheses.persisted",
+                producer="langgraph.rca",
+                payload={"hypothesis_ids": hypothesis_ids},
             ),
         )
 
@@ -262,6 +321,31 @@ def _unique_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]
         seen.add(key)
         unique.append(tool_call)
     return unique
+
+
+def _supporting_evidence_payload(
+    hypothesis: dict[str, Any], evidence_ids_by_type: dict[str, str]
+) -> dict[str, Any]:
+    refs = list(hypothesis.get("supporting_evidence_refs", []))
+    existing_ids = list(hypothesis.get("supporting_evidence_ids", []))
+    stored_ids = [
+        evidence_ids_by_type[ref]
+        for ref in refs
+        if isinstance(ref, str) and ref in evidence_ids_by_type
+    ]
+    return {
+        "refs": refs,
+        "ids": list(dict.fromkeys([*existing_ids, *stored_ids])),
+        "next_actions": hypothesis.get("next_actions", []),
+    }
+
+
+def _rca_model_name(state: dict[str, Any]) -> str | None:
+    for model_call in state.get("model_calls", []):
+        model_name = model_call.get("model_name")
+        if isinstance(model_name, str) and model_name:
+            return model_name
+    return None
 
 
 def _stable_hash(value: Any) -> str:

@@ -12,8 +12,10 @@ from airp.schemas.incidents import (
     IncidentRead,
     IncidentSignal,
     IncidentTimeline,
+    RCAHypothesisRead,
     RemediationPlanCreate,
     RemediationPlanRead,
+    ToolCallRead,
     WorkflowSignalRequest,
 )
 from airp.services.incident_service import IncidentService
@@ -147,6 +149,54 @@ async def add_evidence(
 ) -> EvidenceItemRead:
     evidence = await IncidentService(session).add_evidence(incident_id, payload)
     return EvidenceItemRead.model_validate(evidence)
+
+
+@router.get("/{incident_id}/evidence", response_model=list[EvidenceItemRead])
+async def list_evidence(
+    incident_id: str,
+    session: DbSession,
+    _: CurrentPrincipal,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[EvidenceItemRead]:
+    evidence_items = await IncidentService(session).list_evidence(
+        incident_id,
+        limit=limit,
+        offset=offset,
+    )
+    return [EvidenceItemRead.model_validate(item) for item in evidence_items]
+
+
+@router.get("/{incident_id}/tool-calls", response_model=list[ToolCallRead])
+async def list_tool_calls(
+    incident_id: str,
+    session: DbSession,
+    _: CurrentPrincipal,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[ToolCallRead]:
+    tool_calls = await IncidentService(session).list_tool_calls(
+        incident_id,
+        limit=limit,
+        offset=offset,
+    )
+    return [ToolCallRead.model_validate(tool_call) for tool_call in tool_calls]
+
+
+@router.get("/{incident_id}/hypotheses", response_model=list[RCAHypothesisRead])
+async def list_rca_hypotheses(
+    incident_id: str,
+    session: DbSession,
+    _: CurrentPrincipal,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[RCAHypothesisRead]:
+    hypotheses = await IncidentService(session).list_rca_hypotheses(
+        incident_id,
+        limit=limit,
+        offset=offset,
+    )
+    return [RCAHypothesisRead.model_validate(hypothesis) for hypothesis in hypotheses]
 
 
 @router.post(

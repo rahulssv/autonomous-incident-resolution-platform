@@ -11,6 +11,9 @@ def test_app_registers_expected_routes() -> None:
     assert "/api/health" in paths
     assert "/api/incidents" in paths
     assert "/api/incidents/{incident_id}/workflow/signals" in paths
+    assert "/api/incidents/{incident_id}/evidence" in paths
+    assert "/api/incidents/{incident_id}/tool-calls" in paths
+    assert "/api/incidents/{incident_id}/hypotheses" in paths
     assert "/api/services" in paths
     assert "/api/repositories" in paths
     assert "/api/workloads" in paths

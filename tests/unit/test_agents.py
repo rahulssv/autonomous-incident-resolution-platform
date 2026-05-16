@@ -7,7 +7,12 @@ from airp.agents.embedding import EmbeddingAgent
 from airp.agents.evidence import RCAEvidenceCollector
 from airp.agents.monitoring import MonitoringAgent
 from airp.agents.rca import RCAAgent
-from airp.agents.state import AgentGraphState, MonitoringAssessment
+from airp.agents.state import (
+    AgentGraphState,
+    MonitoringAssessment,
+    RCAHypothesisOutput,
+    RCAHypothesisSet,
+)
 from airp.agents.supervisor import LangGraphSupervisor
 from airp.core.config import Settings
 from airp.integrations.dockerhub.client import DockerHubClient, DockerHubImageEvidence
@@ -53,6 +58,28 @@ class FakeEmbeddingClient:
         self.inputs.append((input_text, model))
         count = len(input_text) if isinstance(input_text, list) else 1
         return [[0.1, 0.2, 0.3] for _ in range(count)]
+
+
+class FakeRCAClient:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def structured_chat(self, **kwargs) -> RCAHypothesisSet:
+        self.calls.append(kwargs)
+        return RCAHypothesisSet(
+            summary="Recent checkout change likely increased latency.",
+            hypotheses=[
+                RCAHypothesisOutput(
+                    rank=1,
+                    hypothesis="A recent checkout timeout change is the likely cause.",
+                    confidence=0.82,
+                    supporting_evidence_refs=["github", "kubernetes"],
+                    contradictions=[],
+                    next_actions=["review_checkout_timeout_change"],
+                )
+            ],
+            escalation_required=False,
+        )
 
 
 def sample_state() -> AgentGraphState:
@@ -139,6 +166,8 @@ async def test_rca_agent_builds_evidence_bundle_from_available_context() -> None
     assert "service_catalog" in update["rca_evidence_bundle"]["evidence_sources"]
     assert "runtime_workload" in update["rca_evidence_bundle"]["evidence_sources"]
     assert update["agent_events"][0]["event_type"] == "rca.started"
+    assert update["rca_hypothesis_result"]["escalation_required"] is True
+    assert update["agent_events"][1]["event_type"] == "rca.hypotheses.generated"
 
 
 async def test_rca_agent_collects_read_only_runtime_repository_and_image_evidence() -> None:
@@ -239,6 +268,33 @@ async def test_rca_agent_collects_read_only_runtime_repository_and_image_evidenc
         "github_mcp",
         "dockerhub",
     }
+    assert update["rca_hypotheses"][0]["supporting_evidence_refs"] == [
+        "kubernetes",
+        "github",
+        "dockerhub",
+    ]
+
+
+async def test_rca_agent_generates_structured_hypotheses_with_mocked_genaihub() -> None:
+    state = sample_state()
+    state["monitoring_assessment"] = {"summary": "Checkout alert is valid."}
+    state["correlation_result"] = {
+        "context_summary": "service=checkout-api",
+        "repository_url": "https://github.com/AIRP-client/checkout-api",
+    }
+    state["service_context"] = {"name": "checkout-api"}
+    client = FakeRCAClient()
+
+    update = await RCAAgent(
+        settings=Settings(llm_rca_model="gpt-5.2-CIO"),
+        llm_client=client,
+    )(state)
+
+    assert update["rca_hypotheses"][0]["confidence"] == 0.82
+    assert update["rca_hypothesis_result"]["summary"].startswith("Recent checkout")
+    assert update["model_calls"][0]["model_name"] == "gpt-5.2-CIO"
+    assert update["model_calls"][0]["prompt_template_version"] == "rca-hypothesis-v1"
+    assert client.calls[0]["response_model"] is RCAHypothesisSet
 
 
 async def test_langgraph_supervisor_routes_monitoring_correlation_rca_then_embedding() -> None:
@@ -272,6 +328,7 @@ async def test_langgraph_supervisor_routes_monitoring_correlation_rca_then_embed
         "monitoring.assessed",
         "correlation.completed",
         "rca.started",
+        "rca.hypotheses.generated",
         "embedding.generated",
     ]
     assert state["monitoring_assessment"]["affected_service"] == "checkout-api"

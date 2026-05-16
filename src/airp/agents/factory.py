@@ -30,6 +30,10 @@ def build_default_agent_supervisor(settings: Settings | None = None) -> LangGrap
     return LangGraphSupervisor(
         monitoring_agent=MonitoringAgent(settings=settings, llm_client=genai_client),
         correlation_agent=CorrelationAgent(),
-        rca_agent=RCAAgent(evidence_collector=evidence_collector),
+        rca_agent=RCAAgent(
+            settings=settings,
+            evidence_collector=evidence_collector,
+            llm_client=genai_client,
+        ),
         embedding_agent=EmbeddingAgent(settings=settings, embedder=genai_client),
     )

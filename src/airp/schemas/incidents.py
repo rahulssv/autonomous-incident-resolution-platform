@@ -125,6 +125,45 @@ class EvidenceItemRead(TimestampedRead):
     data: dict[str, Any]
 
 
+class ToolCallRead(TimestampedRead):
+    incident_id: str | None = None
+    tool_server: str
+    tool_name: str
+    parameters_hash: str | None = None
+    result_hash: str | None = None
+    latency_ms: int | None = None
+    error: str | None = None
+
+
+class RCAHypothesisCreate(BaseModel):
+    rank: int = Field(ge=1)
+    hypothesis: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    supporting_evidence: dict[str, Any] = Field(default_factory=dict)
+    contradicting_evidence: dict[str, Any] = Field(default_factory=dict)
+    model_name: str | None = Field(default=None, max_length=160)
+
+
+class RCAHypothesisRead(TimestampedRead):
+    incident_id: str
+    rank: int
+    hypothesis: str
+    confidence: float
+    supporting_evidence: dict[str, Any]
+    contradicting_evidence: dict[str, Any]
+    model_name: str | None = None
+
+
+class ModelCallCreate(BaseModel):
+    model_name: str = Field(min_length=1, max_length=160)
+    prompt_template_version: str | None = Field(default=None, max_length=120)
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    latency_ms: int | None = None
+    response_hash: str | None = Field(default=None, max_length=128)
+    validation_result: dict[str, Any] = Field(default_factory=dict)
+
+
 class RemediationPlanCreate(BaseModel):
     plan_summary: str = Field(min_length=1)
     risk_level: RiskLevel = RiskLevel.MEDIUM

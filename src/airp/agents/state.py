@@ -61,6 +61,23 @@ class RCAPlan(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
+class RCAHypothesisOutput(BaseModel):
+    rank: int = Field(ge=1)
+    hypothesis: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    supporting_evidence_refs: list[str] = Field(default_factory=list)
+    supporting_evidence_ids: list[str] = Field(default_factory=list)
+    contradictions: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
+class RCAHypothesisSet(BaseModel):
+    summary: str
+    hypotheses: list[RCAHypothesisOutput] = Field(default_factory=list)
+    escalation_required: bool = False
+    escalation_reason: str | None = None
+
+
 class AgentGraphState(TypedDict, total=False):
     incident_id: str
     workflow_id: str | None
@@ -75,11 +92,14 @@ class AgentGraphState(TypedDict, total=False):
     correlation_result: dict[str, Any]
     rca_plan: dict[str, Any]
     rca_evidence_bundle: dict[str, Any]
+    rca_hypothesis_result: dict[str, Any]
+    rca_hypotheses: list[dict[str, Any]]
     embedding_run: dict[str, Any]
     embedding_texts: list[str]
     embedding_vectors: list[list[float]]
     evidence_ids: list[str]
     tool_calls: list[dict[str, Any]]
+    model_calls: list[dict[str, Any]]
     errors: list[str]
     next_action: str
     agent_events: list[dict[str, Any]]

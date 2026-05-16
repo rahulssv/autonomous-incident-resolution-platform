@@ -12,6 +12,8 @@ from airp.db.models.incident import (
     EvidenceItem,
     Incident,
     IncidentEvent,
+    ModelCall,
+    RCAHypothesis,
     RemediationPlan,
     ToolCall,
 )
@@ -21,6 +23,8 @@ from airp.schemas.incidents import (
     IncidentCreate,
     IncidentEventCreate,
     IncidentSignal,
+    ModelCallCreate,
+    RCAHypothesisCreate,
     RemediationPlanCreate,
 )
 
@@ -186,6 +190,19 @@ class IncidentService:
         await self.session.refresh(evidence)
         return evidence
 
+    async def list_evidence(
+        self, incident_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[EvidenceItem]:
+        await self.get_incident(incident_id)
+        stmt = (
+            select(EvidenceItem)
+            .where(EvidenceItem.incident_id == incident_id)
+            .order_by(EvidenceItem.created_at)
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self.session.scalars(stmt)).all())
+
     async def add_tool_call(
         self,
         incident_id: str,
@@ -211,6 +228,56 @@ class IncidentService:
         await self.session.commit()
         await self.session.refresh(tool_call)
         return tool_call
+
+    async def list_tool_calls(
+        self, incident_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[ToolCall]:
+        await self.get_incident(incident_id)
+        stmt = (
+            select(ToolCall)
+            .where(ToolCall.incident_id == incident_id)
+            .order_by(ToolCall.created_at)
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self.session.scalars(stmt)).all())
+
+    async def add_rca_hypothesis(
+        self, incident_id: str, payload: RCAHypothesisCreate
+    ) -> RCAHypothesis:
+        await self.get_incident(incident_id)
+        hypothesis = RCAHypothesis(
+            incident_id=incident_id,
+            **payload.model_dump(mode="json"),
+        )
+        self.session.add(hypothesis)
+        await self.session.commit()
+        await self.session.refresh(hypothesis)
+        return hypothesis
+
+    async def list_rca_hypotheses(
+        self, incident_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[RCAHypothesis]:
+        await self.get_incident(incident_id)
+        stmt = (
+            select(RCAHypothesis)
+            .where(RCAHypothesis.incident_id == incident_id)
+            .order_by(RCAHypothesis.rank, RCAHypothesis.created_at)
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self.session.scalars(stmt)).all())
+
+    async def add_model_call(self, incident_id: str, payload: ModelCallCreate) -> ModelCall:
+        await self.get_incident(incident_id)
+        model_call = ModelCall(
+            incident_id=incident_id,
+            **payload.model_dump(mode="json"),
+        )
+        self.session.add(model_call)
+        await self.session.commit()
+        await self.session.refresh(model_call)
+        return model_call
 
     async def create_remediation_plan(
         self,
