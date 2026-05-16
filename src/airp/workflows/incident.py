@@ -15,7 +15,7 @@ ACTIVITY_RETRY_POLICY = RetryPolicy(
     maximum_interval=timedelta(seconds=10),
     maximum_attempts=5,
 )
-AGENT_GRAPH_ACTIVITY_TIMEOUT = timedelta(minutes=2)
+AGENT_GRAPH_ACTIVITY_TIMEOUT = timedelta(minutes=8)
 AGENT_GRAPH_RETRY_POLICY = RetryPolicy(
     initial_interval=timedelta(seconds=2),
     maximum_interval=timedelta(seconds=20),

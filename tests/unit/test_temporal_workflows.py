@@ -68,7 +68,7 @@ async def test_temporal_starter_uses_stable_incident_workflow_id() -> None:
 
 
 async def test_agent_graph_activity_has_dedicated_retry_settings() -> None:
-    assert AGENT_GRAPH_ACTIVITY_TIMEOUT.total_seconds() == 120
+    assert AGENT_GRAPH_ACTIVITY_TIMEOUT.total_seconds() == 480
     assert AGENT_GRAPH_RETRY_POLICY.maximum_attempts == 3
 
 
