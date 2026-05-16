@@ -54,33 +54,43 @@
             }
         },
         "kubernetes_mcp": {
-            "status": "disabled",
-            "configured": false,
-            "required": false,
+            "status": "ready",
+            "configured": true,
+            "required": true,
             "details": {
-                "transport": "disabled",
-                "namespace_allowlist": [],
+                "transport": "mcp",
+                "endpoint_url": "http://kubernetes-mcp:8080/",
+                "timeout_seconds": 20.0,
+                "namespace_allowlist": [
+                    "shopfast",
+                    "payments",
+                    "catalog"
+                ],
+                "warning": null,
                 "check_mode": "configuration_only",
                 "reachability": "not_checked"
             }
         },
         "github_mcp": {
-            "status": "disabled",
-            "configured": false,
-            "required": false,
+            "status": "ready",
+            "configured": true,
+            "required": true,
             "details": {
-                "transport": "disabled",
+                "transport": "mcp",
+                "endpoint_url": "http://github-mcp:8080/",
+                "timeout_seconds": 20.0,
                 "repository_allowlist": [
                     "AIRP-client/*"
                 ],
+                "warning": null,
                 "check_mode": "configuration_only",
                 "reachability": "not_checked"
             }
         },
         "dockerhub": {
-            "status": "disabled",
+            "status": "ready",
             "configured": true,
-            "required": false,
+            "required": true,
             "details": {
                 "base_url": "https://hub.docker.com/v2",
                 "timeout_seconds": 20.0,
