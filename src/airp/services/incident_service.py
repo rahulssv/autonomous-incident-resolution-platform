@@ -12,6 +12,7 @@ from airp.db.models.incident import (
     DocumentationReport,
     EvidenceItem,
     Incident,
+    IncidentEmbedding,
     IncidentEvent,
     ModelCall,
     RCAHypothesis,
@@ -23,6 +24,7 @@ from airp.schemas.incidents import (
     DocumentationReportCreate,
     EvidenceItemCreate,
     IncidentCreate,
+    IncidentEmbeddingCreate,
     IncidentEventCreate,
     IncidentSignal,
     ModelCallCreate,
@@ -342,6 +344,34 @@ class IncidentService:
             select(DocumentationReport)
             .where(DocumentationReport.incident_id == incident_id)
             .order_by(DocumentationReport.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self.session.scalars(stmt)).all())
+
+    async def create_incident_embedding(
+        self,
+        incident_id: str,
+        payload: IncidentEmbeddingCreate,
+    ) -> IncidentEmbedding:
+        await self.get_incident(incident_id)
+        embedding = IncidentEmbedding(
+            incident_id=incident_id,
+            **payload.model_dump(mode="json"),
+        )
+        self.session.add(embedding)
+        await self.session.commit()
+        await self.session.refresh(embedding)
+        return embedding
+
+    async def list_incident_embeddings(
+        self, incident_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[IncidentEmbedding]:
+        await self.get_incident(incident_id)
+        stmt = (
+            select(IncidentEmbedding)
+            .where(IncidentEmbedding.incident_id == incident_id)
+            .order_by(IncidentEmbedding.created_at.desc())
             .limit(limit)
             .offset(offset)
         )

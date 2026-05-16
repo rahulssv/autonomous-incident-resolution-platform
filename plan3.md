@@ -11,8 +11,9 @@ Already implemented:
 - FastAPI backend scaffold with modular routes, services, schemas, and settings.
 - Microsoft Entra ID authentication boundary.
 - SQLAlchemy async models for catalog, repositories, workloads, incidents, events, evidence, approvals, remediation plans, model calls, tool calls, GitHub artifacts, Slack messages, and embeddings.
+- SQLAlchemy async model and migration for internal documentation report drafts.
 - Alembic initial schema plus incident idempotency migration.
-- REST APIs for health, incidents, timelines, audit, services, repositories, workloads, approvals, remediation plan creation, and search.
+- REST APIs for health, incidents, timelines, audit, services, repositories, workloads, approvals, remediation plan creation/listing, documentation report draft listing, and search.
 - GenAI Hub adapter with OpenAI-compatible chat, structured chat, embeddings, redaction, retries, and model routing settings.
 - Integration boundaries for GitHub MCP, Kubernetes MCP, Slack, and DockerHub.
 - Azure Event Hubs Kafka-compatible configuration and JSON event publishing.
@@ -31,10 +32,13 @@ Already implemented:
 - Temporal `agent_graph_run` persistence for RCA hypotheses and GenAI model-call audit records.
 - RCA safety hardening for unsupported claims, low-confidence escalation, prompt-injection text in evidence, and scenario fixtures.
 - Read APIs for incident evidence, tool calls, model calls, and RCA hypotheses.
+- Read APIs for remediation plans and documentation report drafts.
+- Read API for persisted incident graph embeddings with safe vector metadata.
 - Disabled-by-default external action policy flags and shared artifact idempotency helper for future GitHub, Slack, PR, and documentation writes.
 - Remediation Agent LangGraph node with typed output, prompt, deterministic fallback, policy grounding, and internal remediation-plan persistence.
 - Documentation Agent LangGraph node with typed report-draft output, prompt, deterministic fallback, and publishing disabled by policy.
 - LangGraph supervisor route now runs Monitoring, Correlation, RCA, Remediation, Documentation, and Embedding in sequence.
+- Embedding Agent generates redacted graph embeddings for incident, RCA, remediation, and documentation summaries when an embedding client is configured, and Temporal persists them into the existing JSON-backed `incident_embeddings` table.
 - Live-read configuration scaffolding for Kubernetes MCP, GitHub MCP, and DockerHub, including endpoint settings, read timeouts, retry settings, namespace/repository allowlists, readiness checks, and failure timeline events.
 - Dockerfile, Docker Compose, Helm chart, AKS helper script, migration script, deployment docs, and verification script.
 - Helm deployment defaults expose the read-only evidence configuration and use `/api/readiness` for API readiness probing.
@@ -71,9 +75,10 @@ Verified from the current repository on 2026-05-16:
 - RCA evidence collection records unavailable, forbidden, and timeout outcomes as visible incident timeline events.
 - RCA evidence persistence stores evidence item payload hashes and tool-call parameter/result hashes.
 - RCA fallback reasoning uses DockerHub `source_commit_sha` when present, but full AKS image ID to DockerHub digest to GitHub commit correlation is still pending.
-- Current Temporal workflow invokes a LangGraph supervisor through the `agent_graph_run` activity and persists RCA artifacts plus proposed remediation plans.
+- Current Temporal workflow invokes a LangGraph supervisor through the `agent_graph_run` activity and persists RCA artifacts, proposed remediation plans, and documentation report drafts.
+- Current graph embedding output is persisted to `incident_embeddings`; pgvector conversion and semantic ranking remain pending.
 - Current GenAI Hub integration is used as an optional LLM/embedding adapter; RCA, Remediation, and Documentation prompt/model-call paths are implemented, while shared prompt loading and production evals are still pending.
-- Current verification baseline is `./scripts/verify.sh` with 65 passing tests.
+- Current verification baseline is `./scripts/verify.sh` with 70 passing tests.
 
 ## Remaining Work Summary
 
@@ -89,9 +94,9 @@ The remaining product work is:
 - Slack notification, signed approval callbacks, threaded updates, replay protection, and approval expiry.
 - LangGraph expansion from the current Monitoring, Correlation, RCA evidence/hypothesis, Remediation planning, Documentation drafting, and Embedding MVP into graph checkpoints, graph resume, external artifact governance, and graph execution audit.
 - GenAI Hub production agent controls beyond the RCA prompt: shared prompt loading, model fallback policy, token/cost tracking, groundedness rules, prompt-injection hardening, and eval fixtures.
-- Incident memory: pgvector-backed embeddings, semantic search, background embedding jobs, ranking tests, and secret-safe embedding policy.
+- Incident memory: persisted graph embeddings, pgvector-backed embeddings, semantic search, background embedding jobs, ranking tests, and secret-safe embedding policy.
 - End-to-end RCA, remediation, documentation, and knowledge-loop behavior.
-- API completion for GitHub artifacts, Slack messages, audit export, policy management, refresh, and republish flows.
+- API completion for incident embeddings, GitHub artifacts, Slack messages, audit export, policy management, refresh, and republish flows.
 - Observability, security hardening, CI/CD, AKS production deployment, end-to-end simulations, resilience testing, and handoff documentation.
 
 ## Product Guardrails
@@ -115,7 +120,7 @@ The remaining product work is:
 5. Harden LangGraph-based structured GenAI agents with report persistence, checkpoints, resume behavior, graph audit, and governed external-write routing.
 6. Add Slack notifications and approval callbacks.
 7. Add governed GitHub issue and draft PR creation.
-8. Add incident memory with pgvector.
+8. Add incident memory persistence, then pgvector-backed semantic search after embedding dimensions are confirmed.
 9. Harden security, observability, CI/CD, and AKS deployment.
 10. Prove the product with end-to-end incident simulations.
 
@@ -227,7 +232,7 @@ Tasks:
 - [x] Persist RCA Kubernetes/GitHub/DockerHub evidence sections and recorded tool calls from `agent_graph_run`.
 - [x] Persist RCA hypotheses and RCA model-call audit records from `agent_graph_run`.
 - [x] Persist generated Remediation Agent plan records from `agent_graph_run`.
-- [ ] Persist generated Documentation Agent report drafts from `agent_graph_run`.
+- [x] Persist generated Documentation Agent report drafts from `agent_graph_run`.
 - [ ] Implement dedicated live workflow activities for Kubernetes evidence, GitHub evidence, DockerHub image evidence, GitHub issue creation, Slack notifications, remediation planning, approval handling, PR creation, documentation, and closure.
 - [x] Add workflow signals: pause, resume, approve, reject, escalate, close.
 - [ ] Add workflow signal for retry failed activity.
@@ -444,14 +449,17 @@ Tasks:
 - [x] Add Documentation Agent graph node.
 - [x] Add Documentation Agent prompt and structured output.
 - [x] Documentation Agent: generate RCA report draft from timeline, evidence, hypotheses, and remediation plan.
+- [x] Documentation Agent: store report drafts in PostgreSQL.
 - [ ] Documentation Agent: enrich final report with GitHub issue, PR, Slack thread, approval, and outcome after those artifacts exist.
-- [ ] Documentation Agent: store final report and publish to configured wiki target when enabled.
+- [ ] Documentation Agent: store final post-closure report and publish to configured wiki target when enabled.
 - [x] Add Embedding Agent graph node.
 - [x] Add Embedding Agent prompt-free embedding workflow using GenAI Hub `embeddings`.
 - [x] Embedding Agent: generate embeddings for incident symptoms and current graph summaries when an embedding client is configured.
+- [x] Embedding Agent: include remediation and documentation summaries in graph embedding input.
+- [x] Embedding Agent: persist generated graph texts and vectors to `incident_embeddings` with retry-safe idempotency.
 - [ ] Embedding Agent: generate embeddings for stored evidence summaries, RCA hypotheses, remediation outcomes, and final report.
 - [x] Embedding Agent: redact secret-like content before embedding.
-- [ ] Embedding Agent: persist vectors in PostgreSQL + pgvector once vector migration is complete.
+- [ ] Embedding Agent: migrate persisted vectors to PostgreSQL + pgvector once vector dimensions are confirmed.
 - [ ] Embedding Agent: retry embedding failures without blocking urgent remediation.
 - [x] Add typed Pydantic output schemas for Monitoring and Embedding agents.
 - [x] Add typed Pydantic output schemas for Correlation and RCA agents.
@@ -495,10 +503,9 @@ Goal: use historical incidents to improve RCA and remediation.
 Tasks:
 
 - [ ] Enable pgvector in migrations.
-- [ ] Store embeddings for incident symptoms.
-- [ ] Store embeddings for RCA summaries.
-- [ ] Store embeddings for remediation outcomes.
-- [ ] Store embeddings for final documentation reports.
+- [x] Store graph embeddings for incident symptoms, RCA summaries, remediation plans, and documentation drafts in the existing JSON-backed `incident_embeddings` table.
+- [x] Add read API for stored incident embeddings with safe text/vector metadata.
+- [ ] Store embeddings for stored evidence summaries, RCA hypotheses, remediation outcomes, and final documentation reports.
 - [ ] Implement vector-backed search.
 - [ ] Combine vector score with service match, environment, recency, and remediation success.
 - [ ] Update `GET /api/search/incidents` to use semantic search when query text is present.
@@ -587,7 +594,8 @@ Tasks:
 - [x] Define final RCA report schema.
 - [x] Generate report draft from timeline, evidence, hypotheses, and remediation plan.
 - [ ] Enrich final report with GitHub issue, PR, Slack thread, approval, and outcome.
-- [ ] Store final report in PostgreSQL.
+- [x] Store report drafts in PostgreSQL.
+- [ ] Store final post-closure report in PostgreSQL.
 - [ ] Publish report to selected wiki target when configured.
 - [ ] Add manual republish endpoint.
 - [ ] Generate prevention follow-up tasks.
@@ -618,8 +626,8 @@ Tasks:
 - [x] Add model call listing endpoint with safe prompt/response hashes only.
 - [x] Add tool call listing endpoint.
 - [x] Add incident audit event listing endpoint.
-- [ ] Add remediation plan listing endpoint.
-- [ ] Add documentation report listing endpoint.
+- [x] Add remediation plan listing endpoint.
+- [x] Add documentation report listing endpoint.
 - [ ] Add audit export endpoint.
 - [ ] Add policy management endpoint for Admin users.
 - [ ] Add manual discovery refresh endpoint.
@@ -890,9 +898,13 @@ Highest-priority remaining engineering tasks:
 - [x] Add Remediation Agent graph node foundation with typed schema, policy grounding, safe planning, and internal plan persistence.
 - [ ] Add Remediation Agent approval wait, branch creation, blocked-path policy, and draft PR creation.
 - [x] Add Documentation Agent graph node foundation with typed schema and report draft generation.
-- [ ] Add Documentation Agent report-draft persistence, final RCA report storage, publishing, and embedding.
+- [x] Add Documentation Agent report-draft persistence.
+- [ ] Add Documentation Agent final RCA report storage, publishing, and embedding.
+- [x] Persist graph embeddings to `incident_embeddings` and expose an incident embeddings read API.
 - [ ] Add vector-backed semantic search and ranking tests.
-- [ ] Add API endpoints for remediation plan listing, documentation report listing, GitHub artifacts, Slack messages, audit export, policy management, discovery refresh, and report republish.
+- [x] Add API endpoints for remediation plan listing and documentation report listing.
+- [x] Add API endpoint for incident embeddings.
+- [ ] Add API endpoints for GitHub artifacts, Slack messages, audit export, policy management, discovery refresh, and report republish.
 - [ ] Add CI/CD workflows for lint, tests, migrations, Docker build, image scanning, SBOM, Helm checks, release, deployment, and rollback.
 - [ ] Deploy and validate AIRP API, alert consumer, and Temporal worker on Azure AKS with Kubernetes secrets and production auth.
 - [ ] Run end-to-end simulations for latency, crash loop, bad config, and failed deployment incidents.
@@ -900,16 +912,17 @@ Highest-priority remaining engineering tasks:
 
 ## Verified Remaining Task Inventory
 
-This inventory was re-verified against the repository on 2026-05-16. It is the consolidated list of remaining product work after the completed read-only RCA, structured RCA, safety, live-read configuration, active readiness, and Remediation/Documentation foundation sprints.
+This inventory was re-verified against the repository on 2026-05-16. It is the consolidated list of remaining product work after the completed read-only RCA, structured RCA, safety, live-read configuration, active readiness, Remediation/Documentation foundation, and documentation persistence/API sprints.
 
 Foundation and data:
 
 - [ ] Run all Alembic migrations against real PostgreSQL 16.
 - [ ] Add pgvector extension migration and convert `incident_embeddings.vector` from JSON to `pgvector.Vector`.
 - [ ] Confirm GenAI Hub embedding dimensions before vector migration.
-- [ ] Add `documentation_reports` model, schemas, migration, service methods, and retention metadata.
+- [x] Add `documentation_reports` model, schemas, migration, service methods, and retention metadata.
+- [x] Add incident embedding create/read schemas and service methods over the existing JSON-backed `incident_embeddings` table.
 - [ ] Add repository-layer query classes for incidents, catalog, approvals, evidence, model calls, tool calls, GitHub artifacts, and Slack messages.
-- [ ] Add repository-layer query classes for remediation plans and documentation reports.
+- [ ] Add repository-layer query classes for remediation plans, documentation reports, and incident embeddings.
 - [ ] Add total-count pagination response models and update list APIs.
 - [ ] Add update/archive semantics for catalog, repositories, workloads, incidents, remediation plans, and approvals where appropriate.
 - [ ] Add database check constraints and optimistic concurrency for approval-sensitive writes.
@@ -968,7 +981,9 @@ Agent layer:
 - [x] Persist generated Remediation Agent plan records internally without external writes.
 - [ ] Add Remediation Agent approval wait and draft PR path.
 - [x] Add Documentation Agent as a LangGraph node with typed schema, prompt, tests, report draft generation, and publishing flag.
-- [ ] Add Documentation Agent report-draft persistence, final RCA report storage, and embedding path.
+- [x] Add Documentation Agent report-draft persistence.
+- [ ] Add Documentation Agent final RCA report storage and embedding path.
+- [x] Persist Embedding Agent graph output to `incident_embeddings`.
 - [ ] Add graph checkpoints, graph resume behavior, graph versioning, and graph execution trace export.
 - [ ] Add graph-level timeout, retry, escalation, and idempotency rules.
 - [ ] Add shared prompt template loader and versioning beyond the RCA prompt.
@@ -987,8 +1002,9 @@ Governed external actions:
 API completion:
 
 - [ ] Add workflow state endpoint and retry-failed-activity signal endpoint.
-- [ ] Add remediation plan listing endpoint.
-- [ ] Add documentation report listing endpoint.
+- [x] Add remediation plan listing endpoint.
+- [x] Add documentation report listing endpoint.
+- [x] Add incident embedding listing endpoint.
 - [ ] Add GitHub artifact and Slack message listing endpoints.
 - [ ] Add audit export endpoint.
 - [ ] Add Admin policy management endpoint.
@@ -1154,19 +1170,57 @@ Verification:
 - `pytest tests/unit/test_agents.py -q` passes with 11 tests.
 - `./scripts/verify.sh` passes with 65 tests.
 
-## Immediate Next Sprint
+## Completed Sprint: Documentation Persistence and Artifact Read APIs
 
 Sprint goal: persist documentation drafts and expose remediation/documentation artifacts through backend APIs without enabling external publishing.
 
 Tasks:
 
-1. [ ] Add a PostgreSQL model, schema, and migration for final RCA documentation report drafts.
-2. [ ] Persist Documentation Agent report drafts from `agent_graph_run`.
-3. [ ] Add `GET /api/incidents/{incident_id}/remediation-plans` for operator inspection.
-4. [ ] Add `GET /api/incidents/{incident_id}/documentation-reports` for report draft inspection.
-5. [ ] Extend Embedding Agent input collection to include remediation summaries and documentation drafts while keeping pgvector persistence pending.
-6. [ ] Add unit and API tests for remediation plan listing and documentation report persistence.
-7. [ ] Keep wiki publishing, Slack sends, GitHub issue creation, and remediation PR creation disabled until approval and policy layers are complete.
+1. [x] Add a PostgreSQL model, schema, and migration for RCA documentation report drafts.
+2. [x] Persist Documentation Agent report drafts from `agent_graph_run`.
+3. [x] Add `GET /api/incidents/{incident_id}/remediation-plans` for operator inspection.
+4. [x] Add `GET /api/incidents/{incident_id}/documentation-reports` for report draft inspection.
+5. [x] Extend Embedding Agent input collection to include remediation summaries and documentation drafts while keeping pgvector persistence pending.
+6. [x] Add unit and API tests for remediation plan listing and documentation report persistence.
+7. [x] Keep wiki publishing, Slack sends, GitHub issue creation, and remediation PR creation disabled until approval and policy layers are complete.
+
+Verification:
+
+- `ruff check src tests` passes.
+- Focused tests for agents, agent persistence, and backend smoke pass with 17 tests.
+- `./scripts/verify.sh` passes with 68 tests.
+
+## Completed Sprint: Graph Embedding Persistence
+
+Sprint goal: persist graph embeddings into the existing `incident_embeddings` table while keeping pgvector conversion pending until embedding dimensions are confirmed.
+
+Tasks:
+
+1. [x] Add incident embedding create/read schemas and service methods.
+2. [x] Persist `embedding_texts` and `embedding_vectors` from `agent_graph_run` into `incident_embeddings`.
+3. [x] Add `GET /api/incidents/{incident_id}/embeddings` with safe text and vector metadata.
+4. [x] Add idempotency for embedding persistence across workflow retries.
+5. [x] Add tests for embedding persistence, redaction, and API route registration.
+6. [x] Keep pgvector conversion, semantic ranking, and vector search pending until GenAI Hub embedding dimensions are confirmed.
+
+Verification:
+
+- `ruff check` for touched embedding persistence/API files passes.
+- Focused tests for agent persistence and backend smoke pass with 7 tests.
+- `./scripts/verify.sh` passes with 70 tests.
+
+## Immediate Next Sprint
+
+Sprint goal: harden core API ergonomics with request/correlation ID middleware and paginated read responses while keeping existing endpoint compatibility in mind.
+
+Tasks:
+
+1. [ ] Add request ID and correlation ID middleware with response headers.
+2. [ ] Add reusable paginated response schemas for incident artifact list endpoints.
+3. [ ] Add total-count query helpers for incident evidence, tool calls, model calls, hypotheses, remediation plans, documentation reports, and embeddings.
+4. [ ] Update list APIs to support `items`, `limit`, `offset`, and `total` responses without breaking current tests.
+5. [ ] Add tests for request/correlation ID propagation and pagination metadata.
+6. [ ] Update OpenAPI examples for the newly paginated incident artifact endpoints.
 
 ## Verified Remaining Critical Path
 
@@ -1174,9 +1228,9 @@ Verified from the repository on 2026-05-16:
 
 1. Live validation: validate Kubernetes MCP, GitHub MCP, and DockerHub read transports against deployed AIRP-client infrastructure and public AIRP-client images.
 2. Governance: wire the existing feature flags, idempotency helper, repository allowlists, and namespace allowlists into future write paths, then add approval policy and blocked-path policy before any GitHub or Slack writes.
-3. Agent completion: extend the new Remediation and Documentation node foundations with report storage, approval workflow states, final artifact enrichment, and governed external writes.
-4. Memory: add pgvector migration, persist embedding vectors, and switch incident search to vector-backed ranking when query text is present.
-5. APIs: add GitHub artifact, Slack message, audit export, policy, discovery refresh, workflow-state, and documentation republish endpoints.
+3. Agent completion: extend the Remediation and Documentation nodes with approval workflow states, final artifact enrichment, and governed external writes.
+4. Memory: add pgvector migration, confirm embedding dimensions, and switch incident search to vector-backed ranking when query text is present.
+5. APIs: add paginated artifact responses, GitHub artifact, Slack message, audit export, policy, discovery refresh, workflow-state, and documentation republish endpoints.
 6. Operations: add metrics, health/readiness checks, request/correlation ID middleware, structured logging, CI/CD workflows, scans, SBOM, and AKS production validation.
 
 ## Production-Ready Definition

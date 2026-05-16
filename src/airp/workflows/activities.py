@@ -14,6 +14,7 @@ from airp.domain.enums import IncidentStatus, RiskLevel
 from airp.schemas.incidents import (
     DocumentationReportCreate,
     EvidenceItemCreate,
+    IncidentEmbeddingCreate,
     IncidentEventCreate,
     IncidentSignal,
     ModelCallCreate,
@@ -217,6 +218,7 @@ async def _persist_rca_outputs(
 
     await _persist_remediation_output(service, incident_id, state)
     await _persist_documentation_output(service, incident_id, state)
+    await _persist_embedding_output(service, incident_id, state)
 
 
 async def _persist_remediation_output(
@@ -341,6 +343,60 @@ async def _persist_documentation_output(
             },
         ),
     )
+
+
+async def _persist_embedding_output(
+    service: IncidentService, incident_id: str, state: dict[str, Any]
+) -> None:
+    texts = state.get("embedding_texts") or []
+    if not isinstance(texts, list) or not texts:
+        return
+
+    vectors = state.get("embedding_vectors") or []
+    existing_embeddings = await service.list_incident_embeddings(incident_id, limit=500)
+    existing_keys = {
+        _embedding_key(existing.embedding_type, existing.text)
+        for existing in existing_embeddings
+    }
+    stored_ids: list[str] = []
+    skipped_duplicates = 0
+
+    for index, text_value in enumerate(texts):
+        text = str(text_value).strip()
+        if not text:
+            continue
+        embedding_type = "langgraph.graph_text"
+        key = _embedding_key(embedding_type, text)
+        if key in existing_keys:
+            skipped_duplicates += 1
+            continue
+        vector = _embedding_vector(vectors, index)
+        stored = await service.create_incident_embedding(
+            incident_id,
+            IncidentEmbeddingCreate(
+                embedding_type=embedding_type,
+                text=text,
+                vector=vector,
+            ),
+        )
+        stored_ids.append(stored.id)
+        existing_keys.add(key)
+
+    if stored_ids or skipped_duplicates:
+        await service.add_event(
+            incident_id,
+            IncidentEventCreate(
+                event_type="embedding.records.persisted",
+                producer="langgraph.embedding",
+                payload={
+                    "embedding_ids": stored_ids,
+                    "stored_count": len(stored_ids),
+                    "skipped_duplicate_count": skipped_duplicates,
+                    "source_text_count": len(texts),
+                    "source_vector_count": len(vectors) if isinstance(vectors, list) else 0,
+                },
+            ),
+        )
 
 
 async def _service_context(session, service_id: str | None) -> dict[str, Any]:
@@ -513,6 +569,22 @@ def _confidence(value: Any) -> float:
     except (TypeError, ValueError):
         return 0.0
     return min(max(confidence, 0.0), 1.0)
+
+
+def _embedding_key(embedding_type: str, text: str) -> str:
+    return _stable_hash({"embedding_type": embedding_type, "text": text})
+
+
+def _embedding_vector(vectors: Any, index: int) -> list[float] | None:
+    if not isinstance(vectors, list) or index >= len(vectors):
+        return None
+    vector = vectors[index]
+    if not isinstance(vector, list):
+        return None
+    try:
+        return [float(value) for value in vector]
+    except (TypeError, ValueError):
+        return None
 
 
 def _stable_hash(value: Any) -> str:

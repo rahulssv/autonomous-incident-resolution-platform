@@ -242,6 +242,21 @@ class DocumentationReportRead(TimestampedRead):
     )
 
 
+class IncidentEmbeddingCreate(BaseModel):
+    embedding_type: str = Field(min_length=1, max_length=120)
+    text: str = Field(min_length=1)
+    vector: list[float] | None = None
+
+
+class IncidentEmbeddingRead(TimestampedRead):
+    incident_id: str
+    embedding_type: str
+    text: str
+    has_vector: bool
+    vector_dimension: int | None = None
+    vector_hash: str | None = None
+
+
 class SearchResult(BaseModel):
     incident_id: str
     title: str

@@ -4,7 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from airp.workflows.activities import _persist_documentation_output
+from airp.workflows.activities import (
+    _persist_documentation_output,
+    _persist_embedding_output,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -12,8 +15,10 @@ pytestmark = pytest.mark.asyncio
 class FakeIncidentService:
     def __init__(self) -> None:
         self.reports = []
+        self.embeddings = []
         self.events = []
         self.created_payloads = []
+        self.created_embedding_payloads = []
 
     async def list_documentation_reports(self, incident_id: str, *, limit: int, offset: int = 0):
         _ = incident_id, limit, offset
@@ -32,6 +37,22 @@ class FakeIncidentService:
         )
         self.reports.append(report)
         return report
+
+    async def list_incident_embeddings(self, incident_id: str, *, limit: int, offset: int = 0):
+        _ = incident_id, limit, offset
+        return self.embeddings
+
+    async def create_incident_embedding(self, incident_id: str, payload):
+        self.created_embedding_payloads.append(payload)
+        embedding = SimpleNamespace(
+            id=f"emb-{len(self.embeddings) + 1}",
+            incident_id=incident_id,
+            embedding_type=payload.embedding_type,
+            text=payload.text,
+            vector=payload.vector,
+        )
+        self.embeddings.append(embedding)
+        return embedding
 
     async def add_event(self, incident_id: str, payload):
         self.events.append((incident_id, payload))
@@ -63,3 +84,25 @@ async def test_documentation_output_persistence_is_idempotent() -> None:
     assert len(service.events) == 1
     assert service.created_payloads[0].metadata["source"] == "langgraph.documentation"
     assert service.events[0][1].event_type == "documentation.report.persisted"
+
+
+async def test_embedding_output_persistence_is_idempotent() -> None:
+    service = FakeIncidentService()
+    state = {
+        "embedding_texts": [
+            "Checkout latency spike",
+            "RCA summary with [REDACTED] runtime context",
+        ],
+        "embedding_vectors": [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+    }
+
+    await _persist_embedding_output(service, "inc-1", state)
+    await _persist_embedding_output(service, "inc-1", state)
+
+    assert len(service.embeddings) == 2
+    assert len(service.created_embedding_payloads) == 2
+    assert service.embeddings[0].embedding_type == "langgraph.graph_text"
+    assert service.embeddings[0].vector == [0.1, 0.2, 0.3]
+    assert service.events[0][1].event_type == "embedding.records.persisted"
+    assert service.events[0][1].payload["stored_count"] == 2
+    assert service.events[1][1].payload["skipped_duplicate_count"] == 2

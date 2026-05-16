@@ -1,3 +1,5 @@
+import hashlib
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Query, status
@@ -8,6 +10,7 @@ from airp.schemas.incidents import (
     EvidenceItemCreate,
     EvidenceItemRead,
     IncidentCreate,
+    IncidentEmbeddingRead,
     IncidentEventCreate,
     IncidentEventRead,
     IncidentRead,
@@ -217,6 +220,22 @@ async def list_model_calls(
     return [ModelCallRead.model_validate(model_call) for model_call in model_calls]
 
 
+@router.get("/{incident_id}/embeddings", response_model=list[IncidentEmbeddingRead])
+async def list_incident_embeddings(
+    incident_id: str,
+    session: DbSession,
+    _: CurrentPrincipal,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[IncidentEmbeddingRead]:
+    embeddings = await IncidentService(session).list_incident_embeddings(
+        incident_id,
+        limit=limit,
+        offset=offset,
+    )
+    return [_embedding_read(embedding) for embedding in embeddings]
+
+
 @router.post(
     "/{incident_id}/remediation-plans",
     response_model=RemediationPlanRead,
@@ -262,3 +281,24 @@ async def list_documentation_reports(
         offset=offset,
     )
     return [DocumentationReportRead.model_validate(report) for report in reports]
+
+
+def _embedding_read(embedding) -> IncidentEmbeddingRead:
+    vector = embedding.vector
+    has_vector = isinstance(vector, list) and bool(vector)
+    return IncidentEmbeddingRead(
+        id=embedding.id,
+        created_at=embedding.created_at,
+        updated_at=embedding.updated_at,
+        incident_id=embedding.incident_id,
+        embedding_type=embedding.embedding_type,
+        text=embedding.text,
+        has_vector=has_vector,
+        vector_dimension=len(vector) if isinstance(vector, list) else None,
+        vector_hash=_stable_hash(vector) if isinstance(vector, list) else None,
+    )
+
+
+def _stable_hash(value: object) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

@@ -4,6 +4,7 @@ from airp.schemas.catalog import ServiceCreate
 from airp.schemas.incidents import (
     DocumentationReportCreate,
     IncidentCreate,
+    IncidentEmbeddingCreate,
     IncidentSignal,
 )
 
@@ -20,6 +21,7 @@ def test_app_registers_expected_routes() -> None:
     assert "/api/incidents/{incident_id}/tool-calls" in paths
     assert "/api/incidents/{incident_id}/hypotheses" in paths
     assert "/api/incidents/{incident_id}/model-calls" in paths
+    assert "/api/incidents/{incident_id}/embeddings" in paths
     assert "/api/incidents/{incident_id}/remediation-plans" in paths
     assert "/api/incidents/{incident_id}/documentation-reports" in paths
     assert "/api/services" in paths
@@ -87,3 +89,16 @@ def test_documentation_report_schema_tracks_publish_policy_metadata() -> None:
     assert payload["publish_recommended"] is True
     assert payload["publishing_enabled"] is False
     assert payload["metadata"]["source"] == "langgraph.documentation"
+
+
+def test_incident_embedding_schema_accepts_json_backed_vectors() -> None:
+    embedding = IncidentEmbeddingCreate(
+        embedding_type="langgraph.graph_text",
+        text="Checkout latency spike",
+        vector=[0.1, 0.2, 0.3],
+    )
+
+    payload = embedding.model_dump(mode="json")
+
+    assert payload["embedding_type"] == "langgraph.graph_text"
+    assert payload["vector"] == [0.1, 0.2, 0.3]
