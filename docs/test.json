@@ -1,0 +1,92 @@
+{
+    "status": "ready",
+    "service": "AIRP Backend API",
+    "environment": "development",
+    "dependencies": {
+        "postgres": {
+            "status": "ready",
+            "configured": true,
+            "required": true,
+            "details": {
+                "check_mode": "configuration_only",
+                "reachability": "not_checked"
+            }
+        },
+        "redis": {
+            "status": "ready",
+            "configured": true,
+            "required": true,
+            "details": {
+                "check_mode": "configuration_only",
+                "reachability": "not_checked"
+            }
+        },
+        "temporal": {
+            "status": "ready",
+            "configured": true,
+            "required": true,
+            "details": {
+                "namespace": "default",
+                "task_queue": "airp-incident-workflows",
+                "check_mode": "configuration_only",
+                "reachability": "not_checked"
+            }
+        },
+        "event_hubs": {
+            "status": "ready",
+            "configured": true,
+            "required": true,
+            "details": {
+                "alerts_raw_topic": "airp.alerts.raw",
+                "deadletter_topic": "airp.deadletter",
+                "check_mode": "configuration_only",
+                "reachability": "not_checked"
+            }
+        },
+        "genaihub": {
+            "status": "ready",
+            "configured": true,
+            "required": true,
+            "details": {
+                "base_url": "https://hub-proxy-service.thankfulfield-16b4d5d6.eastus.azurecontainerapps.io/",
+                "check_mode": "configuration_only",
+                "reachability": "not_checked"
+            }
+        },
+        "kubernetes_mcp": {
+            "status": "disabled",
+            "configured": false,
+            "required": false,
+            "details": {
+                "transport": "disabled",
+                "namespace_allowlist": [],
+                "check_mode": "configuration_only",
+                "reachability": "not_checked"
+            }
+        },
+        "github_mcp": {
+            "status": "disabled",
+            "configured": false,
+            "required": false,
+            "details": {
+                "transport": "disabled",
+                "repository_allowlist": [
+                    "AIRP-client/*"
+                ],
+                "check_mode": "configuration_only",
+                "reachability": "not_checked"
+            }
+        },
+        "dockerhub": {
+            "status": "disabled",
+            "configured": true,
+            "required": false,
+            "details": {
+                "base_url": "https://hub.docker.com/v2",
+                "timeout_seconds": 20.0,
+                "check_mode": "configuration_only",
+                "reachability": "not_checked"
+            }
+        }
+    }
+}

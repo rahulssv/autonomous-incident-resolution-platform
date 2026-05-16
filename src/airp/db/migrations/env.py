@@ -16,7 +16,7 @@ target_metadata = Base.metadata
 
 def _database_url_for_alembic() -> str:
     url = get_settings().database_url
-    return url.replace("+asyncpg", "")
+    return url.replace("+asyncpg", "+psycopg")
 
 
 def run_migrations_offline() -> None:

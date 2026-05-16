@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: airp
       POSTGRES_DB: airp
     ports:
-      - "5432:5432"
+      - "${AIRP_POSTGRES_PORT:-5432}:5432"
     volumes:
       - airp-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -28,7 +28,7 @@ services:
   temporal:
     image: temporalio/auto-setup:1.25
     environment:
-      DB: postgresql
+      DB: postgres12
       DB_PORT: 5432
       POSTGRES_USER: airp
       POSTGRES_PWD: airp
@@ -39,6 +39,44 @@ services:
       postgres:
         condition: service_healthy
 
+  kubernetes-mcp:
+    build: .
+    command: ["uvicorn", "airp.dev.local_mcp:app", "--host", "0.0.0.0", "--port", "8080"]
+    environment:
+      AIRP_LOCAL_MCP_SERVER: kubernetes
+    ports:
+      - "8091:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  github-mcp:
+    build: .
+    command: ["uvicorn", "airp.dev.local_mcp:app", "--host", "0.0.0.0", "--port", "8080"]
+    environment:
+      AIRP_LOCAL_MCP_SERVER: github
+    ports:
+      - "8092:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   api:
     build: .
     environment:
@@ -46,18 +84,44 @@ services:
       AIRP_REDIS_URL: redis://redis:6379/0
       AIRP_ENVIRONMENT: development
       AIRP_LOG_LEVEL: INFO
+      AIRP_READINESS_PROBE_TIMEOUT_SECONDS: ${AIRP_READINESS_PROBE_TIMEOUT_SECONDS:-10}
       AIRP_AUTH_ENABLED: "true"
       AIRP_ENTRA_TENANT_ID: ${AIRP_ENTRA_TENANT_ID:-}
       AIRP_ENTRA_CLIENT_ID: ${AIRP_ENTRA_CLIENT_ID:-}
       AIRP_TEMPORAL_ADDRESS: temporal:7233
-      AIRP_GATEWAY_BASE_URL: ${AIRP_GATEWAY_BASE_URL:-https://hub-proxy-service.thankfulfield-16b4d5d6.eastus.azurecontainerapps.io}
+      AIRP_GATEWAY_BASE_URL: ${AIRP_GATEWAY_BASE_URL:-}
       AIRP_GATEWAY_API_KEY: ${AIRP_GATEWAY_API_KEY:-}
+      AIRP_KAFKA_BOOTSTRAP_SERVERS: ${AIRP_KAFKA_BOOTSTRAP_SERVERS:-}
+      AIRP_KAFKA_SECURITY_PROTOCOL: ${AIRP_KAFKA_SECURITY_PROTOCOL:-SASL_SSL}
+      AIRP_KAFKA_SASL_MECHANISM: ${AIRP_KAFKA_SASL_MECHANISM:-PLAIN}
+      AIRP_KAFKA_USERNAME: ${AIRP_KAFKA_USERNAME:-$$ConnectionString}
+      AIRP_KAFKA_PASSWORD: ${AIRP_KAFKA_PASSWORD:-}
+      AIRP_KAFKA_ALERTS_RAW_TOPIC: ${AIRP_KAFKA_ALERTS_RAW_TOPIC:-airp.alerts.raw}
+      AIRP_KAFKA_INCIDENTS_VALIDATED_TOPIC: ${AIRP_KAFKA_INCIDENTS_VALIDATED_TOPIC:-airp.incidents.validated}
+      AIRP_KAFKA_DEADLETTER_TOPIC: ${AIRP_KAFKA_DEADLETTER_TOPIC:-airp.deadletter}
+      AIRP_KAFKA_ALERT_CONSUMER_GROUP: ${AIRP_KAFKA_ALERT_CONSUMER_GROUP:-airp-alert-consumer}
+      AIRP_AGENT_READ_ONLY_EVIDENCE_ENABLED: ${AIRP_AGENT_READ_ONLY_EVIDENCE_ENABLED:-false}
+      AIRP_KUBERNETES_MCP_TRANSPORT: ${AIRP_KUBERNETES_MCP_TRANSPORT:-disabled}
+      AIRP_KUBERNETES_MCP_URL: ${AIRP_KUBERNETES_MCP_URL:-}
+      AIRP_KUBERNETES_MCP_NAMESPACE_ALLOWLIST: ${AIRP_KUBERNETES_MCP_NAMESPACE_ALLOWLIST:-}
+      AIRP_KUBERNETES_MCP_READ_TIMEOUT_SECONDS: ${AIRP_KUBERNETES_MCP_READ_TIMEOUT_SECONDS:-20}
+      AIRP_GITHUB_MCP_TRANSPORT: ${AIRP_GITHUB_MCP_TRANSPORT:-disabled}
+      AIRP_GITHUB_MCP_URL: ${AIRP_GITHUB_MCP_URL:-}
+      AIRP_GITHUB_MCP_REPOSITORY_ALLOWLIST: ${AIRP_GITHUB_MCP_REPOSITORY_ALLOWLIST:-AIRP-client/*}
+      AIRP_GITHUB_MCP_READ_TIMEOUT_SECONDS: ${AIRP_GITHUB_MCP_READ_TIMEOUT_SECONDS:-20}
+      AIRP_MCP_READ_RETRY_ATTEMPTS: ${AIRP_MCP_READ_RETRY_ATTEMPTS:-2}
+      AIRP_MCP_READ_RETRY_MIN_BACKOFF_SECONDS: ${AIRP_MCP_READ_RETRY_MIN_BACKOFF_SECONDS:-0.1}
+      AIRP_MCP_READ_RETRY_MAX_BACKOFF_SECONDS: ${AIRP_MCP_READ_RETRY_MAX_BACKOFF_SECONDS:-1.0}
     ports:
       - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      kubernetes-mcp:
+        condition: service_healthy
+      github-mcp:
         condition: service_healthy
 
 volumes:

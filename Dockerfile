@@ -8,7 +8,7 @@ WORKDIR /app
 
 RUN addgroup --system airp && adduser --system --ingroup airp airp
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md alembic.ini ./
 COPY src ./src
 
 RUN pip install --upgrade pip && pip install .
@@ -18,4 +18,3 @@ USER airp
 EXPOSE 8080
 
 CMD ["uvicorn", "airp.main:app", "--host", "0.0.0.0", "--port", "8080"]
-

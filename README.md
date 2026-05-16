@@ -93,6 +93,9 @@ AIRP_TEMPORAL_TASK_QUEUE=airp-incident-workflows
 ./scripts/verify.sh
 ```
 
+For a step-by-step local API runbook with curl examples, see
+[docs/API_TESTING.md](docs/API_TESTING.md).
+
 ## Alert Consumer
 
 Run the Event Hubs Kafka-compatible alert consumer:

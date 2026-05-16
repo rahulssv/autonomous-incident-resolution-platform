@@ -117,7 +117,7 @@ class Settings(BaseSettings):
             return f"/{value}"
         return value.rstrip("/") or "/api"
 
-    @field_validator("kubernetes_mcp_url", "github_mcp_url", mode="before")
+    @field_validator("gateway_base_url", "kubernetes_mcp_url", "github_mcp_url", mode="before")
     @classmethod
     def empty_url_to_none(cls, value: object) -> object:
         if value == "":
