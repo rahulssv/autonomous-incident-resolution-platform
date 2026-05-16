@@ -61,13 +61,16 @@ Verified from the current repository on 2026-05-16:
 - RCA Agent rejects unsupported or uncited model claims, escalates low-confidence output, and sanitizes untrusted evidence before prompt construction.
 - RCA Agent records model-call audit metadata for structured GenAI Hub hypothesis generation.
 - Kubernetes, GitHub, and DockerHub evidence clients support fixture-backed reads and typed DTOs for deterministic tests.
-- Kubernetes MCP and GitHub MCP clients now carry live-read transport settings, endpoint URLs, and read timeouts, while live transport methods remain pending.
+- Kubernetes MCP and GitHub MCP clients now carry live-read transport settings, endpoint URLs, read timeouts, and first-pass HTTP read transport methods.
+- Kubernetes MCP and GitHub MCP clients implement the first read-only HTTP MCP bridge contract through `POST <endpoint>/tools/call`.
 - DockerHub client supports live public tag/digest lookup with configurable timeout and HTTP transport mocking.
 - RCA evidence collection enforces configured Kubernetes namespace and GitHub repository allowlists before making read calls.
 - RCA evidence collection records unavailable, forbidden, and timeout outcomes as visible incident timeline events.
 - RCA evidence persistence stores evidence item payload hashes and tool-call parameter/result hashes.
+- RCA fallback reasoning uses DockerHub `source_commit_sha` when present, but full AKS image ID to DockerHub digest to GitHub commit correlation is still pending.
 - Current Temporal workflow invokes a LangGraph supervisor through the `agent_graph_run` activity.
 - Current GenAI Hub integration is used as an optional LLM/embedding adapter; RCA prompt/model-call persistence is implemented, while broader production prompt templates are still pending.
+- Current verification baseline is `./scripts/verify.sh` with 50 passing tests.
 
 ## Remaining Work Summary
 
@@ -214,7 +217,8 @@ Tasks:
 - [x] Persist workflow ID and run ID on incidents.
 - [x] Add basic workflow states for received, validated, agent graph completed, paused, approved, rejected, escalated, and closed.
 - [x] Add workflow states/events for RCA hypotheses generated, issue creation skipped, and Slack notification skipped.
-- [ ] Add workflow states for correlation, issue creation created, Slack notification sent, remediation planning, approval wait, PR creation, documentation, closure, and escalation.
+- [x] Add signal-driven closure and escalation workflow states.
+- [ ] Add workflow states for correlation, issue creation created, Slack notification sent, remediation planning, approval wait, PR creation, and documentation.
 - [x] Implement workflow activities for database state updates.
 - [x] Implement workflow activity hook for LangGraph Monitoring, Correlation, RCA planning, and Embedding.
 - [x] Persist RCA Kubernetes/GitHub/DockerHub evidence sections and recorded tool calls from `agent_graph_run`.
@@ -284,20 +288,22 @@ Tasks:
 - [x] Add fixture-based Kubernetes evidence client tests.
 - [x] Add Kubernetes MCP transport, endpoint URL, namespace allowlist, and read timeout settings.
 - [ ] Configure read-only AKS identity for the Kubernetes MCP server.
-- [ ] Implement live `list_pods` through selected MCP transport.
-- [ ] Implement live `get_pod` through selected MCP transport.
-- [ ] Implement live `get_pod_logs` through selected MCP transport.
-- [ ] Implement live `list_events` through selected MCP transport.
-- [ ] Implement live `get_deployment` through selected MCP transport.
-- [ ] Implement live `get_rollout_status` through selected MCP transport.
-- [ ] Implement live `list_replicasets` through selected MCP transport.
-- [ ] Implement bounded log windows by line count and time range.
+- [x] Implement live `list_pods` through selected MCP transport.
+- [x] Implement live `get_pod` through selected MCP transport.
+- [x] Implement live `get_pod_logs` through selected MCP transport.
+- [x] Implement live `list_events` through selected MCP transport.
+- [x] Implement live `get_deployment` through selected MCP transport.
+- [x] Implement live `get_rollout_status` through selected MCP transport.
+- [x] Implement live `list_replicasets` through selected MCP transport.
+- [x] Implement bounded log windows by line count and time range.
 - [x] Add request timeout settings.
 - [x] Add retry policy for transient MCP failures.
-- [ ] Redact secrets from logs, environment-like strings, tokens, connection strings, and credentials.
-- [ ] Hash and store evidence payloads.
-- [ ] Store Kubernetes evidence in `evidence_items`.
-- [ ] Add evidence source links where possible.
+- [x] Redact secrets from collected Kubernetes RCA evidence before storage.
+- [x] Hash and store Kubernetes RCA evidence payloads.
+- [x] Store Kubernetes RCA evidence in `evidence_items`.
+- [x] Add live MCP response schema validation for Kubernetes payloads before storage.
+- [x] Add evidence source links where possible.
+- [ ] Add partial-collection error details when the Kubernetes MCP server returns partial data.
 - [ ] Add runbook for Kubernetes MCP outage.
 
 Acceptance criteria:
@@ -320,14 +326,15 @@ Tasks:
 - [x] Add GitHub MCP transport, endpoint URL, AIRP-client repository allowlist, and read timeout settings.
 - [ ] Configure least-privilege org-scoped credentials for AIRP-client.
 - [x] Add retry policy for transient GitHub MCP read failures.
-- [ ] Implement live repository listing.
-- [ ] Implement live repository metadata fetch.
-- [ ] Implement live branch lookup.
-- [ ] Implement live commit lookup by SHA.
-- [ ] Implement live commit lookup by time window.
-- [ ] Implement live changed-files lookup.
-- [ ] Implement live merged PR lookup by repository and time window.
-- [ ] Implement live issue lookup by idempotency marker.
+- [x] Redact and hash stored GitHub RCA evidence payloads.
+- [x] Implement live repository listing.
+- [x] Implement live repository metadata fetch.
+- [x] Implement live branch lookup.
+- [x] Implement live commit lookup by SHA.
+- [x] Implement live commit lookup by time window.
+- [x] Implement live changed-files lookup.
+- [x] Implement live merged PR lookup by repository and time window.
+- [x] Implement live issue lookup by idempotency marker.
 - [ ] Implement issue creation with idempotency.
 - [ ] Implement branch creation with safe naming.
 - [ ] Implement file read on target branch.
@@ -337,6 +344,8 @@ Tasks:
 - [ ] Block merge operations.
 - [ ] Block force-push and branch deletion.
 - [ ] Block secret file reads where possible.
+- [x] Add live MCP response schema validation for GitHub payloads before storage.
+- [ ] Add partial-collection error details when the GitHub MCP server returns partial data.
 - [ ] Persist GitHub issues, PRs, comments, branches, and external IDs in `github_artifacts`.
 
 Acceptance criteria:
@@ -411,8 +420,8 @@ Tasks:
 - [x] Add versioned RCA prompt template.
 - [x] Add RCA Agent structured output.
 - [x] RCA Agent: call configured read-only evidence collector for Kubernetes, GitHub, and DockerHub evidence.
-- [ ] RCA Agent: call live Kubernetes MCP for pods, logs, events, deployments, rollout state, restart count, image ID, and namespace context.
-- [ ] RCA Agent: call live GitHub MCP for commits, merged PRs, changed files, releases, owners, and prior issues.
+- [x] RCA Agent: call live Kubernetes MCP for pods, logs, events, deployments, rollout state, restart count, image ID, and namespace context.
+- [x] RCA Agent: call live GitHub MCP for commits, merged PRs, changed files, releases, owners, and prior issues.
 - [x] RCA Agent: call live DockerHub client for image tag and digest correlation.
 - [x] RCA Agent: build initial evidence-planning bundle from incident, monitoring, catalog, and workload context.
 - [x] RCA Agent: extend evidence bundle with Kubernetes, GitHub, and DockerHub evidence.
@@ -505,10 +514,11 @@ Tasks:
 - [x] Record intended and completed RCA tool calls without enabling external writes.
 - [ ] Implement full RCA workflow activity orchestration with Kubernetes, GitHub, DockerHub, Slack, and issue creation steps.
 - [x] Collect fixture-backed Kubernetes pod logs, events, restarts, image IDs, and deployment state.
-- [ ] Collect Kubernetes pod logs, events, restarts, image IDs, and deployment state.
+- [x] Collect live Kubernetes pod logs, events, restarts, image IDs, and deployment state.
 - [x] Collect fixture-backed GitHub commits, PRs, issues, release metadata, and changed files.
-- [ ] Collect GitHub commits, PRs, issues, release metadata, and changed files.
+- [x] Collect live GitHub commits, PRs, issues, release metadata, and changed files.
 - [x] Collect fixture-backed DockerHub image tag, digest, and source metadata.
+- [x] Collect live DockerHub image tag, digest, and source metadata through public tag lookup.
 - [ ] Correlate AKS image ID to DockerHub digest.
 - [ ] Correlate DockerHub digest or tag to GitHub commit.
 - [x] Build initial RCA evidence bundle from incident, monitoring, catalog, and workload context.
@@ -597,6 +607,7 @@ Tasks:
 - [ ] Add Slack message listing endpoint.
 - [x] Add model call listing endpoint with safe prompt/response hashes only.
 - [x] Add tool call listing endpoint.
+- [x] Add incident audit event listing endpoint.
 - [ ] Add audit export endpoint.
 - [ ] Add policy management endpoint for Admin users.
 - [ ] Add manual discovery refresh endpoint.
@@ -846,13 +857,14 @@ Highest-priority remaining engineering tasks:
 - [ ] Add graph checkpoints and resume behavior for LangGraph supervisor state.
 - [x] Add Kubernetes MCP read DTOs and fixture-backed methods used by RCA Agent.
 - [x] Add Kubernetes MCP live-read transport settings, namespace allowlist, read timeout, and retry scaffolding.
-- [ ] Add live Kubernetes MCP transport methods used by RCA Agent.
+- [x] Add live Kubernetes MCP transport methods used by RCA Agent.
 - [x] Add GitHub MCP read DTOs and fixture-backed methods used by RCA Agent.
 - [x] Add GitHub MCP live-read transport settings, AIRP-client repository allowlist, read timeout, and retry scaffolding.
-- [ ] Add live GitHub MCP transport methods used by RCA Agent.
+- [x] Add live GitHub MCP transport methods used by RCA Agent.
 - [x] Add DockerHub image evidence DTOs and fixture-backed digest/source metadata lookup.
 - [x] Add DockerHub live tag/digest lookup with HTTP mock tests and timeout configuration.
-- [ ] Add live DockerHub digest/source correlation behavior.
+- [x] Add live DockerHub digest/source metadata lookup behavior.
+- [ ] Add full AKS image digest to DockerHub digest to GitHub commit correlation behavior.
 - [x] Persist Kubernetes, GitHub, and DockerHub evidence items from RCA runs.
 - [x] Add structured GenAI RCA hypothesis generation with evidence citations.
 - [x] Persist RCA hypotheses and RCA model-call audit records.
@@ -869,6 +881,107 @@ Highest-priority remaining engineering tasks:
 - [ ] Deploy and validate AIRP API, alert consumer, and Temporal worker on Azure AKS with Kubernetes secrets and production auth.
 - [ ] Run end-to-end simulations for latency, crash loop, bad config, and failed deployment incidents.
 - [ ] Complete production runbooks and handoff documentation.
+
+## Verified Remaining Task Inventory
+
+This inventory was re-verified against the repository on 2026-05-16. It is the consolidated list of remaining product work after the completed read-only RCA, structured RCA, safety, and live-read configuration sprints.
+
+Foundation and data:
+
+- [ ] Run all Alembic migrations against real PostgreSQL 16.
+- [ ] Add pgvector extension migration and convert `incident_embeddings.vector` from JSON to `pgvector.Vector`.
+- [ ] Confirm GenAI Hub embedding dimensions before vector migration.
+- [ ] Add repository-layer query classes for incidents, catalog, approvals, evidence, model calls, tool calls, GitHub artifacts, and Slack messages.
+- [ ] Add total-count pagination response models and update list APIs.
+- [ ] Add update/archive semantics for catalog, repositories, workloads, incidents, remediation plans, and approvals where appropriate.
+- [ ] Add database check constraints and optimistic concurrency for approval-sensitive writes.
+- [ ] Add request ID and correlation ID middleware with response headers.
+- [ ] Add structured audit events for every mutating API route.
+
+Authentication and authorization:
+
+- [ ] Add Entra issuer discovery and JWKS caching/rotation behavior.
+- [ ] Validate `nbf`, required `tid`, and required app roles.
+- [ ] Define and enforce `AIRP.Admin`, `AIRP.SRE`, `AIRP.Viewer`, and `AIRP.Approver`.
+- [ ] Add route-level RBAC for catalog/admin, incident mutation, approval decisions, and read-only access.
+- [ ] Add signed JWT fixtures and negative auth tests.
+- [ ] Document Entra app registration, scopes, roles, and local token acquisition.
+
+Event Hubs and ingestion:
+
+- [ ] Provision raw alert, validated incident, agent event, and dead-letter Event Hubs topics.
+- [ ] Validate the alert consumer and sample publisher against the real Azure Event Hubs Kafka endpoint.
+- [ ] Add alert consumer liveness/readiness and operational metrics.
+- [ ] Add replay and dead-letter inspection/replay tooling.
+- [ ] Add a local Kafka-compatible integration test profile when available.
+
+Temporal workflow:
+
+- [ ] Add full lifecycle workflow states for correlation, issue creation, Slack notification, remediation, approval wait, PR creation, documentation, and completion.
+- [ ] Add dedicated activities for live evidence collection, GitHub issue creation, Slack notification, remediation, approval handling, PR creation, documentation, and closure.
+- [ ] Add retry-failed-activity signal and workflow queries for evidence summary, approval request, and timeline.
+- [ ] Add activity-specific retry policies, non-retryable error classes, and heartbeat handling.
+- [ ] Add workflow replay tests and worker restart tests.
+- [ ] Add idempotency keys to every future external-write activity.
+
+Discovery and mapping:
+
+- [ ] Implement AIRP-client GitHub repository discovery with owners, default branch, topics, CODEOWNERS, archived state, and visibility.
+- [ ] Implement DockerHub public tag listing and image provenance capture.
+- [ ] Implement AKS workload inventory sync through Kubernetes MCP.
+- [ ] Persist repository-to-image-to-workload mappings.
+- [ ] Detect unmapped running images and repositories with images not running in AKS.
+- [ ] Add scheduled discovery worker, manual refresh API, discovery audit events, and fixture tests.
+
+Live read integrations:
+
+- [x] Define the concrete MCP HTTP request/response contract for Kubernetes and GitHub read tools.
+- [x] Implement live Kubernetes MCP reads for pods, pod details, logs, events, deployments, rollout status, and replica sets.
+- [x] Implement bounded Kubernetes log windows by line count and optional time range.
+- [x] Implement live GitHub MCP reads for repository metadata, branches, commits, changed files, merged PRs, releases, and prior issues.
+- [x] Add live MCP response schema validation before evidence storage.
+- [x] Add evidence source links where possible.
+- [ ] Add partial-collection error details when upstream MCP transports return partial data.
+- [x] Add transport-level tests for success, timeout, 429, 5xx, and malformed payloads.
+
+Agent layer:
+
+- [ ] Add Remediation Agent as a LangGraph node with typed schema, prompt, tests, policy guardrails, approval wait, and draft PR path.
+- [ ] Add Documentation Agent as a LangGraph node with typed schema, prompt, final RCA report storage, publishing flag, and embedding path.
+- [ ] Add graph checkpoints, graph resume behavior, graph versioning, and graph execution trace export.
+- [ ] Add graph-level timeout, retry, escalation, and idempotency rules.
+- [ ] Add shared prompt template loader and versioning beyond the RCA prompt.
+- [ ] Add token counts, cost estimates, model fallback policy, rate-limit handling, and model-timeout escalation.
+- [ ] Persist embeddings for stored evidence summaries, RCA hypotheses, remediation outcomes, and final reports.
+- [ ] Add vector-backed incident memory and semantic ranking.
+
+Governed external actions:
+
+- [ ] Add idempotent GitHub issue creation after policy allows it.
+- [ ] Add Slack incident notification, signed callbacks, threaded updates, approval actions, expiry, and replay protection.
+- [ ] Add remediation policy schema, risk levels, blocked paths, protected-branch rules, and required tests.
+- [ ] Add branch creation, AIRP-owned branch writes, draft PR creation, PR comments, CI tracking, and PR artifact persistence.
+- [ ] Keep merge, force-push, destructive branch actions, and unsafe secret-file reads blocked.
+
+API completion:
+
+- [ ] Add workflow state endpoint and retry-failed-activity signal endpoint.
+- [ ] Add GitHub artifact and Slack message listing endpoints.
+- [ ] Add audit export endpoint.
+- [ ] Add Admin policy management endpoint.
+- [ ] Add discovery refresh and documentation republish endpoints.
+- [ ] Add OpenAPI examples for production APIs.
+
+Operations, security, deployment, and handoff:
+
+- [ ] Add OpenTelemetry instrumentation, Prometheus metrics, and Grafana dashboards.
+- [ ] Add active dependency health checks for PostgreSQL, Redis, Temporal, Event Hubs, GenAI Hub, Kubernetes MCP, GitHub MCP, DockerHub, and Slack.
+- [ ] Add readiness behavior that fails when required dependencies are unavailable.
+- [ ] Add request body limits, rate limiting, production CORS validation, and security headers.
+- [ ] Add CI/CD for lint, tests, migrations, Docker build, image scanning, SBOM, Helm checks, release, deploy, and rollback.
+- [ ] Deploy API, alert consumer, and Temporal worker to Azure AKS with production auth and Kubernetes secrets.
+- [ ] Run end-to-end incident simulations for latency, crash loop, bad config, and failed deployment scenarios.
+- [ ] Complete runbooks, onboarding guide, rollback guide, and production readiness checklist.
 
 ## Completed Sprint: Read-Only RCA Evidence Boundary
 

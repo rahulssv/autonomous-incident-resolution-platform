@@ -48,6 +48,8 @@ async def readiness(
             details={
                 "base_url": str(settings.dockerhub_base_url),
                 "timeout_seconds": settings.dockerhub_read_timeout_seconds,
+                "check_mode": "configuration_only",
+                "reachability": "not_checked",
             },
         ),
     }
@@ -78,21 +80,36 @@ def _mcp_dependency(
             status="disabled",
             configured=False,
             required=False,
-            details={"transport": transport, allowlist_name: allowlist},
+            details={
+                "transport": transport,
+                allowlist_name: allowlist,
+                "check_mode": "configuration_only",
+                "reachability": "not_checked",
+            },
         )
     if transport != "mcp":
         return DependencyReadiness(
             status="misconfigured",
             configured=False,
             required=True,
-            details={"transport": transport, "reason": "transport must be 'mcp'"},
+            details={
+                "transport": transport,
+                "reason": "transport must be 'mcp'",
+                "check_mode": "configuration_only",
+                "reachability": "not_checked",
+            },
         )
     if not endpoint_url:
         return DependencyReadiness(
             status="misconfigured",
             configured=False,
             required=True,
-            details={"transport": transport, "reason": "endpoint URL is required"},
+            details={
+                "transport": transport,
+                "reason": "endpoint URL is required",
+                "check_mode": "configuration_only",
+                "reachability": "not_checked",
+            },
         )
     return DependencyReadiness(
         status="ready" if allowlist else "warning",
@@ -104,5 +121,7 @@ def _mcp_dependency(
             "timeout_seconds": timeout_seconds,
             allowlist_name: allowlist,
             "warning": None if allowlist else f"{allowlist_name} is empty",
+            "check_mode": "configuration_only",
+            "reachability": "not_checked",
         },
     )

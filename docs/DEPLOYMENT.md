@@ -111,6 +111,27 @@ Check the configuration surface after deployment:
 curl http://localhost:8080/api/readiness
 ```
 
+The current read-only MCP HTTP bridge contract is intentionally small:
+
+```http
+POST <AIRP_*_MCP_URL>/tools/call
+Content-Type: application/json
+Accept: application/json
+```
+
+```json
+{
+  "tool": "kubernetes.list_pods",
+  "arguments": {
+    "namespace": "shopfast"
+  }
+}
+```
+
+Responses may be direct JSON, `{"result": ...}`, `{"data": ...}`, or MCP-style
+`{"content": [{"type": "json", "json": ...}]}`. AIRP currently uses only
+read-only tool names under the `kubernetes.*` and `github.*` prefixes.
+
 ## 7. Database and Redis
 
 For production, use managed or cluster-hosted PostgreSQL with pgvector enabled and a production Redis instance.
