@@ -3,15 +3,19 @@ from __future__ import annotations
 import pytest
 
 from airp.agents.correlation import CorrelationAgent
+from airp.agents.documentation import DocumentationAgent
 from airp.agents.embedding import EmbeddingAgent
 from airp.agents.evidence import RCAEvidenceCollector
 from airp.agents.monitoring import MonitoringAgent
 from airp.agents.rca import RCAAgent
+from airp.agents.remediation import RemediationAgent
 from airp.agents.state import (
     AgentGraphState,
+    DocumentationReportDraft,
     MonitoringAssessment,
     RCAHypothesisOutput,
     RCAHypothesisSet,
+    RemediationAgentOutput,
 )
 from airp.agents.supervisor import LangGraphSupervisor
 from airp.core.config import Settings
@@ -79,6 +83,49 @@ class FakeRCAClient:
                 )
             ],
             escalation_required=False,
+        )
+
+
+class FakeRemediationClient:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def structured_chat(self, **kwargs) -> RemediationAgentOutput:
+        self.calls.append(kwargs)
+        return RemediationAgentOutput(
+            plan_summary="Tune checkout timeout handling behind approval.",
+            risk_level="medium",
+            risk_score=0.62,
+            test_plan="Run checkout unit and integration tests.",
+            rollback_plan="Revert timeout change or roll back to the last healthy image.",
+            approval_required=True,
+            blocked_path_findings=[],
+            recommended_actions=["update_timeout_config", "run_checkout_tests"],
+            evidence_refs=["github", "kubernetes"],
+            external_writes_allowed=True,
+            pr_creation_recommended=True,
+            confidence=0.8,
+        )
+
+
+class FakeDocumentationClient:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def structured_chat(self, **kwargs) -> DocumentationReportDraft:
+        self.calls.append(kwargs)
+        return DocumentationReportDraft(
+            title="RCA Draft: Checkout latency spike",
+            executive_summary="Checkout latency rose after a recent timeout change.",
+            root_cause_summary="Recent checkout timeout change likely increased latency.",
+            impact_summary="Critical checkout service latency degraded.",
+            evidence_summary="Used Kubernetes restart evidence and GitHub commit evidence.",
+            remediation_summary="Prepare a minimal timeout fix after approval.",
+            follow_up_tasks=["add_timeout_regression_test"],
+            source_refs=["kubernetes", "github"],
+            publish_recommended=True,
+            publishing_enabled=True,
+            confidence=0.82,
         )
 
 
@@ -297,9 +344,143 @@ async def test_rca_agent_generates_structured_hypotheses_with_mocked_genaihub() 
     assert client.calls[0]["response_model"] is RCAHypothesisSet
 
 
+def rca_ready_state() -> AgentGraphState:
+    state = sample_state()
+    state["service_context"] = {
+        "name": "checkout-api",
+        "repository_url": "https://github.com/AIRP-client/checkout-api",
+        "docker_image": "docker.io/airpclient/checkout-api:v1",
+        "namespace": "shopfast",
+    }
+    state["correlation_result"] = {
+        "service_name": "checkout-api",
+        "repository_url": "https://github.com/AIRP-client/checkout-api",
+        "docker_image": "docker.io/airpclient/checkout-api:v1",
+        "context_summary": "service=checkout-api repository=checkout-api",
+    }
+    state["rca_evidence_bundle"] = {
+        "incident_id": "inc-1",
+        "evidence_sources": ["incident", "kubernetes", "github"],
+        "kubernetes": {"logs": [{"lines": ["timeout talking to payments"]}]},
+        "github": {"commits": [{"sha": "abc123", "message": "Tighten timeout"}]},
+    }
+    state["rca_hypothesis_result"] = {
+        "summary": "Recent checkout timeout change likely increased latency.",
+        "escalation_required": False,
+    }
+    state["rca_hypotheses"] = [
+        {
+            "rank": 1,
+            "hypothesis": "A recent checkout timeout change is the likely cause.",
+            "confidence": 0.78,
+            "supporting_evidence_refs": ["kubernetes", "github"],
+            "contradictions": [],
+            "next_actions": ["review_timeout_change"],
+        }
+    ]
+    return state
+
+
+async def test_remediation_agent_builds_safe_deterministic_plan() -> None:
+    agent = RemediationAgent(
+        settings=Settings(remediation_pr_creation_enabled=False),
+    )
+
+    update = await agent(rca_ready_state())
+
+    result = update["remediation_result"]
+    assert result["approval_required"] is True
+    assert result["external_writes_allowed"] is False
+    assert result["pr_creation_recommended"] is True
+    assert result["risk_level"] == "medium"
+    assert "github" in result["evidence_refs"]
+    assert result["blocked_path_findings"] == [
+        "Remediation PR creation feature flag is disabled"
+    ]
+    assert update["agent_events"][0]["event_type"] == "remediation.planned"
+
+
+async def test_remediation_agent_uses_mocked_genaihub_and_policy_grounding() -> None:
+    client = FakeRemediationClient()
+    agent = RemediationAgent(
+        settings=Settings(
+            llm_remediation_model="gpt-5.2-CIO",
+            remediation_pr_creation_enabled=False,
+        ),
+        llm_client=client,
+    )
+
+    update = await agent(rca_ready_state())
+
+    result = update["remediation_result"]
+    assert result["external_writes_allowed"] is False
+    assert result["approval_required"] is True
+    assert result["risk_score"] == 0.62
+    assert "Remediation PR creation feature flag is disabled" in result[
+        "blocked_path_findings"
+    ]
+    assert update["model_calls"][0]["model_name"] == "gpt-5.2-CIO"
+    assert update["model_calls"][0]["prompt_template_version"] == "remediation-plan-v1"
+    assert client.calls[0]["response_model"] is RemediationAgentOutput
+
+
+async def test_documentation_agent_builds_safe_deterministic_draft() -> None:
+    state = rca_ready_state()
+    state["remediation_result"] = {
+        "plan_summary": "Prepare a minimal timeout fix after approval.",
+        "recommended_actions": ["review_timeout_change"],
+        "evidence_refs": ["kubernetes", "github"],
+    }
+    agent = DocumentationAgent(
+        settings=Settings(documentation_publishing_enabled=False),
+    )
+
+    update = await agent(state)
+
+    report = update["documentation_report"]
+    assert report["publishing_enabled"] is False
+    assert report["publish_recommended"] is True
+    assert "A recent checkout timeout change" in report["root_cause_summary"]
+    assert "github" in report["source_refs"]
+    assert "Documentation publishing feature flag is disabled" in report[
+        "follow_up_tasks"
+    ]
+    assert update["agent_events"][0]["event_type"] == "documentation.drafted"
+
+
+async def test_documentation_agent_uses_mocked_genaihub_and_policy_grounding() -> None:
+    client = FakeDocumentationClient()
+    state = rca_ready_state()
+    state["remediation_result"] = {
+        "plan_summary": "Prepare a minimal timeout fix after approval.",
+        "recommended_actions": ["review_timeout_change"],
+        "evidence_refs": ["kubernetes", "github"],
+    }
+    agent = DocumentationAgent(
+        settings=Settings(
+            llm_documentation_model="gpt-4.1",
+            documentation_publishing_enabled=False,
+        ),
+        llm_client=client,
+    )
+
+    update = await agent(state)
+
+    report = update["documentation_report"]
+    assert report["publishing_enabled"] is False
+    assert "Documentation publishing feature flag is disabled" in report[
+        "follow_up_tasks"
+    ]
+    assert update["model_calls"][0]["model_name"] == "gpt-4.1"
+    assert update["model_calls"][0]["prompt_template_version"] == "documentation-report-v1"
+    assert client.calls[0]["response_model"] is DocumentationReportDraft
+
+
 async def test_langgraph_supervisor_routes_monitoring_correlation_rca_then_embedding() -> None:
     supervisor = LangGraphSupervisor(
         monitoring_agent=MonitoringAgent(llm_client=FakeMonitoringClient()),
+        remediation_agent=RemediationAgent(settings=Settings()),
+        documentation_agent=DocumentationAgent(settings=Settings()),
         embedding_agent=EmbeddingAgent(embedder=FakeEmbeddingClient()),
     )
 
@@ -329,9 +510,13 @@ async def test_langgraph_supervisor_routes_monitoring_correlation_rca_then_embed
         "correlation.completed",
         "rca.started",
         "rca.hypotheses.generated",
+        "remediation.planned",
+        "documentation.drafted",
         "embedding.generated",
     ]
     assert state["monitoring_assessment"]["affected_service"] == "checkout-api"
     assert state["correlation_result"]["repository_url"] == "https://github.com/AIRP-client/checkout-api"
     assert state["rca_plan"]["status"] == "ready_for_evidence_collection"
+    assert state["remediation_result"]["approval_required"] is True
+    assert state["documentation_report"]["publishing_enabled"] is False
     assert state["embedding_run"]["vector_count"] >= 1

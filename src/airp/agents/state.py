@@ -78,6 +78,35 @@ class RCAHypothesisSet(BaseModel):
     escalation_reason: str | None = None
 
 
+class RemediationAgentOutput(BaseModel):
+    plan_summary: str
+    risk_level: Literal["low", "medium", "high"] = "medium"
+    risk_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    test_plan: str
+    rollback_plan: str
+    approval_required: bool = True
+    blocked_path_findings: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    external_writes_allowed: bool = False
+    pr_creation_recommended: bool = False
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class DocumentationReportDraft(BaseModel):
+    title: str
+    executive_summary: str
+    root_cause_summary: str
+    impact_summary: str
+    evidence_summary: str
+    remediation_summary: str
+    follow_up_tasks: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    publish_recommended: bool = False
+    publishing_enabled: bool = False
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
 class AgentGraphState(TypedDict, total=False):
     incident_id: str
     workflow_id: str | None
@@ -94,6 +123,8 @@ class AgentGraphState(TypedDict, total=False):
     rca_evidence_bundle: dict[str, Any]
     rca_hypothesis_result: dict[str, Any]
     rca_hypotheses: list[dict[str, Any]]
+    remediation_result: dict[str, Any]
+    documentation_report: dict[str, Any]
     embedding_run: dict[str, Any]
     embedding_texts: list[str]
     embedding_vectors: list[list[float]]

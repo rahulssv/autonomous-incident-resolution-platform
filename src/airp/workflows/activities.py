@@ -10,13 +10,14 @@ from temporalio import activity
 from airp.agents.factory import build_default_agent_supervisor
 from airp.db.models.catalog import RuntimeWorkload, ServiceCatalog
 from airp.db.session import AsyncSessionLocal
-from airp.domain.enums import IncidentStatus
+from airp.domain.enums import IncidentStatus, RiskLevel
 from airp.schemas.incidents import (
     EvidenceItemCreate,
     IncidentEventCreate,
     IncidentSignal,
     ModelCallCreate,
     RCAHypothesisCreate,
+    RemediationPlanCreate,
 )
 from airp.services.incident_service import IncidentService
 
@@ -213,6 +214,71 @@ async def _persist_rca_outputs(
             ),
         )
 
+    await _persist_remediation_output(service, incident_id, state)
+
+
+async def _persist_remediation_output(
+    service: IncidentService, incident_id: str, state: dict[str, Any]
+) -> None:
+    remediation = state.get("remediation_result") or {}
+    if not remediation:
+        return
+
+    plan_hash = _stable_hash(remediation)
+    existing_plans = await service.list_remediation_plans(incident_id, limit=100)
+    for plan in existing_plans:
+        metadata = plan.extra or {}
+        if (
+            metadata.get("source") == "langgraph.remediation"
+            and metadata.get("state_hash") == plan_hash
+        ):
+            return
+
+    risk_level = _risk_level(remediation.get("risk_level"))
+    plan = await service.create_remediation_plan(
+        incident_id,
+        RemediationPlanCreate(
+            plan_summary=remediation.get(
+                "plan_summary",
+                "Remediation plan was unavailable from agent output.",
+            ),
+            risk_level=risk_level,
+            test_plan=remediation.get("test_plan"),
+            rollback_plan=remediation.get("rollback_plan"),
+            approval_required=bool(remediation.get("approval_required", True)),
+            metadata={
+                "source": "langgraph.remediation",
+                "state_hash": plan_hash,
+                "risk_score": remediation.get("risk_score"),
+                "blocked_path_findings": remediation.get("blocked_path_findings", []),
+                "recommended_actions": remediation.get("recommended_actions", []),
+                "evidence_refs": remediation.get("evidence_refs", []),
+                "external_writes_allowed": remediation.get(
+                    "external_writes_allowed", False
+                ),
+                "pr_creation_recommended": remediation.get(
+                    "pr_creation_recommended", False
+                ),
+                "confidence": remediation.get("confidence"),
+            },
+        ),
+    )
+    await service.add_event(
+        incident_id,
+        IncidentEventCreate(
+            event_type="remediation.plan.persisted",
+            producer="langgraph.remediation",
+            payload={
+                "remediation_plan_id": plan.id,
+                "risk_level": plan.risk_level,
+                "approval_required": plan.approval_required,
+                "external_writes_allowed": remediation.get(
+                    "external_writes_allowed", False
+                ),
+            },
+        ),
+    )
+
 
 async def _service_context(session, service_id: str | None) -> dict[str, Any]:
     if not service_id:
@@ -369,6 +435,13 @@ def _rca_model_name(state: dict[str, Any]) -> str | None:
         if isinstance(model_name, str) and model_name:
             return model_name
     return None
+
+
+def _risk_level(value: Any) -> RiskLevel:
+    try:
+        return RiskLevel(str(value))
+    except ValueError:
+        return RiskLevel.MEDIUM
 
 
 def _stable_hash(value: Any) -> str:

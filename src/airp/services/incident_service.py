@@ -306,6 +306,19 @@ class IncidentService:
         await self.session.refresh(plan)
         return plan
 
+    async def list_remediation_plans(
+        self, incident_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[RemediationPlan]:
+        await self.get_incident(incident_id)
+        stmt = (
+            select(RemediationPlan)
+            .where(RemediationPlan.incident_id == incident_id)
+            .order_by(RemediationPlan.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self.session.scalars(stmt)).all())
+
 
 def _stable_hash(value: Any) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)

@@ -29,3 +29,8 @@ class ExternalActionPolicy:
         if not self.settings.remediation_pr_creation_enabled:
             return PolicyDecision(False, "Remediation PR creation feature flag is disabled")
         return PolicyDecision(True, "Remediation PR creation feature flag is enabled")
+
+    def documentation_publishing(self) -> PolicyDecision:
+        if not self.settings.documentation_publishing_enabled:
+            return PolicyDecision(False, "Documentation publishing feature flag is disabled")
+        return PolicyDecision(True, "Documentation publishing feature flag is enabled")

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from airp.agents.correlation import CorrelationAgent
+from airp.agents.documentation import DocumentationAgent
 from airp.agents.embedding import EmbeddingAgent
 from airp.agents.evidence import RCAEvidenceCollector
 from airp.agents.monitoring import MonitoringAgent
 from airp.agents.rca import RCAAgent
+from airp.agents.remediation import RemediationAgent
 from airp.agents.supervisor import LangGraphSupervisor
 from airp.core.config import Settings, get_settings
 from airp.integrations.dockerhub.client import DockerHubClient
@@ -53,5 +55,7 @@ def build_default_agent_supervisor(settings: Settings | None = None) -> LangGrap
             evidence_collector=evidence_collector,
             llm_client=genai_client,
         ),
+        remediation_agent=RemediationAgent(settings=settings, llm_client=genai_client),
+        documentation_agent=DocumentationAgent(settings=settings, llm_client=genai_client),
         embedding_agent=EmbeddingAgent(settings=settings, embedder=genai_client),
     )
