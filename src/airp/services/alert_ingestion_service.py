@@ -1,9 +1,11 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from airp.core.config import Settings, get_settings
+from airp.db.models.catalog import ServiceCatalog
 from airp.messaging.alertmanager import NormalizedAlert, normalize_alertmanager_payload
 from airp.messaging.dedupe import DedupeStore
 from airp.schemas.incidents import IncidentEventCreate
@@ -62,8 +64,13 @@ class AlertIngestionService:
         if not claimed:
             return None
 
+        incident_payload = alert.to_incident_create()
+        service_id = await self._resolve_service_id(alert)
+        if service_id:
+            incident_payload = incident_payload.model_copy(update={"service_id": service_id})
+
         incident, created = await self.incidents.create_incident_once(
-            alert.to_incident_create(),
+            incident_payload,
             actor=actor,
         )
         if not created:
@@ -92,6 +99,39 @@ class AlertIngestionService:
             actor=actor,
         )
         return incident.id
+
+    async def _resolve_service_id(self, alert: NormalizedAlert) -> str | None:
+        criteria = []
+        if alert.namespace:
+            criteria.append(
+                and_(
+                    ServiceCatalog.name == alert.service,
+                    ServiceCatalog.namespace == alert.namespace,
+                    ServiceCatalog.environment == alert.environment,
+                )
+            )
+        if alert.deployment and alert.namespace:
+            criteria.append(
+                and_(
+                    ServiceCatalog.deployment == alert.deployment,
+                    ServiceCatalog.namespace == alert.namespace,
+                    ServiceCatalog.environment == alert.environment,
+                )
+            )
+        criteria.append(
+            and_(
+                ServiceCatalog.name == alert.service,
+                ServiceCatalog.environment == alert.environment,
+            )
+        )
+
+        for criterion in criteria:
+            service_id = await self.session.scalar(
+                select(ServiceCatalog.id).where(criterion).limit(1)
+            )
+            if service_id:
+                return service_id
+        return None
 
     async def _start_workflow(
         self,

@@ -4,7 +4,7 @@ import hashlib
 import json
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from temporalio import activity
 
 from airp.agents.factory import build_default_agent_supervisor
@@ -428,18 +428,28 @@ async def _workload_context(
     namespace: str | None,
     pod_name: str | None,
 ) -> dict[str, Any]:
-    conditions = []
-    if service_id:
-        conditions.append(RuntimeWorkload.service_id == service_id)
-    if namespace:
-        conditions.append(RuntimeWorkload.namespace == namespace)
+    candidate_conditions = []
+    if namespace and pod_name:
+        candidate_conditions.append(
+            (
+                RuntimeWorkload.namespace == namespace,
+                RuntimeWorkload.pod_name == pod_name,
+            )
+        )
     if pod_name:
-        conditions.append(RuntimeWorkload.pod_name == pod_name)
-    if not conditions:
-        return {}
+        candidate_conditions.append((RuntimeWorkload.pod_name == pod_name,))
+    if service_id:
+        candidate_conditions.append((RuntimeWorkload.service_id == service_id,))
+    if namespace:
+        candidate_conditions.append((RuntimeWorkload.namespace == namespace,))
 
-    stmt = select(RuntimeWorkload).where(or_(*conditions)).limit(1)
-    workload = await session.scalar(stmt)
+    workload = None
+    for conditions in candidate_conditions:
+        stmt = select(RuntimeWorkload).where(*conditions).limit(1)
+        workload = await session.scalar(stmt)
+        if workload is not None:
+            break
+
     if workload is None:
         return {}
     return {
