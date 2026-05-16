@@ -65,6 +65,14 @@ class EmbeddingAgent:
             summary = state["monitoring_assessment"].get("summary")
             if summary:
                 texts.append(str(summary))
+        if state.get("correlation_result"):
+            summary = state["correlation_result"].get("context_summary")
+            if summary:
+                texts.append(str(summary))
+        if state.get("rca_plan"):
+            summary = state["rca_plan"].get("summary")
+            if summary:
+                texts.append(str(summary))
         return texts
 
     def _state_update(
