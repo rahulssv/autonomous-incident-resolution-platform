@@ -36,12 +36,18 @@ class Settings(BaseSettings):
 
     gateway_base_url: AnyHttpUrl | None = None
     gateway_api_key: str | None = None
+    gateway_max_retries: int = Field(default=0, ge=0, le=5)
     llm_monitoring_model: str = "gpt-4.1-nano"
     llm_correlation_model: str = "gpt-4.1"
     llm_rca_model: str = "gpt-5.2-CIO"
     llm_remediation_model: str = "gpt-5.2-CIO"
     llm_documentation_model: str = "gpt-4.1"
     llm_embedding_model: str = "embeddings"
+    embedding_enabled: bool = True
+    embedding_max_texts: int = Field(default=16, ge=1, le=50)
+    embedding_text_max_chars: int = Field(default=750, ge=100, le=12_000)
+    embedding_total_max_chars: int = Field(default=3_000, ge=100, le=50_000)
+    embedding_rate_limit_cooldown_seconds: int = Field(default=120, ge=0, le=3_600)
     agent_read_only_evidence_enabled: bool = False
     rca_min_hypothesis_confidence: float = Field(default=0.4, ge=0.0, le=1.0)
     kubernetes_mcp_transport: Literal["disabled", "mcp"] = "disabled"

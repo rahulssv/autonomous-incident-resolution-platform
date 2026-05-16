@@ -64,6 +64,16 @@ class FakeEmbeddingClient:
         return [[0.1, 0.2, 0.3] for _ in range(count)]
 
 
+class RateLimitedEmbeddingClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def embed(self, *, input_text: str | list[str], model: str | None = None) -> list[list[float]]:
+        _ = input_text, model
+        self.calls += 1
+        raise RuntimeError("429 Too Many Requests: TPM limit exceeded")
+
+
 class FakeRCAClient:
     def __init__(self) -> None:
         self.calls = []
@@ -200,6 +210,54 @@ async def test_embedding_agent_includes_remediation_and_documentation_summaries(
     assert "Checkout latency increased after a timeout change." in joined
     assert "Documentation follow-ups: add_latency_test" in joined
     assert update["embedding_run"]["vector_count"] == len(input_text)
+
+
+async def test_embedding_agent_applies_text_budget_before_embedding() -> None:
+    client = FakeEmbeddingClient()
+    agent = EmbeddingAgent(
+        settings=Settings(
+            llm_embedding_model="embeddings",
+            embedding_max_texts=2,
+            embedding_text_max_chars=100,
+            embedding_total_max_chars=150,
+        ),
+        embedder=client,
+    )
+    state = sample_state()
+    state["title"] = "x" * 200
+    state["description"] = "y" * 200
+    state["monitoring_assessment"] = {"summary": "z" * 200}
+
+    update = await agent(state)
+
+    input_text, _ = client.inputs[0]
+    assert input_text == ["x" * 100, "y" * 50]
+    assert update["embedding_run"]["embedded_text_count"] == 2
+    assert update["embedding_run"]["vector_count"] == 2
+
+
+async def test_embedding_agent_cools_down_after_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("airp.agents.embedding._EMBEDDING_RATE_LIMITED_UNTIL", 0.0)
+    rate_limited_client = RateLimitedEmbeddingClient()
+    settings = Settings(
+        llm_embedding_model="embeddings",
+        embedding_rate_limit_cooldown_seconds=120,
+    )
+    first_agent = EmbeddingAgent(settings=settings, embedder=rate_limited_client)
+
+    first = await first_agent(sample_state())
+
+    assert first["embedding_run"]["skipped"] is True
+    assert "TPM limit exceeded" in first["embedding_run"]["reason"]
+    assert rate_limited_client.calls == 1
+
+    healthy_client = FakeEmbeddingClient()
+    second_agent = EmbeddingAgent(settings=settings, embedder=healthy_client)
+    second = await second_agent(sample_state())
+
+    assert second["embedding_run"]["skipped"] is True
+    assert "Cooldown remaining" in second["embedding_run"]["reason"]
+    assert healthy_client.inputs == []
 
 
 async def test_correlation_agent_uses_service_and_workload_context() -> None:

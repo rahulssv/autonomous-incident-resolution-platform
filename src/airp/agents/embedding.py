@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Protocol
 
 from airp.agents.state import AgentEvent, AgentGraphState, EmbeddingRun
@@ -10,6 +11,9 @@ from airp.integrations.genaihub.redaction import redact_text
 class EmbeddingClient(Protocol):
     def embed(self, *, input_text: str | list[str], model: str | None = None) -> list[list[float]]:
         """Return embedding vectors for the provided text."""
+
+
+_EMBEDDING_RATE_LIMITED_UNTIL = 0.0
 
 
 class EmbeddingAgent:
@@ -24,6 +28,15 @@ class EmbeddingAgent:
         self.embedder = embedder
 
     async def __call__(self, state: AgentGraphState) -> AgentGraphState:
+        if not self.settings.embedding_enabled:
+            run = EmbeddingRun(
+                embedded_text_count=0,
+                vector_count=0,
+                skipped=True,
+                reason="Embedding generation is disabled.",
+            )
+            return self._state_update(state, run, [], [])
+
         texts = self._texts_from_state(state)
         if not texts:
             run = EmbeddingRun(
@@ -34,7 +47,16 @@ class EmbeddingAgent:
             )
             return self._state_update(state, run, [], [])
 
-        redacted_texts = [redact_text(text) for text in texts]
+        redacted_texts = self._budget_texts([redact_text(text) for text in texts])
+        if not redacted_texts:
+            run = EmbeddingRun(
+                embedded_text_count=0,
+                vector_count=0,
+                skipped=True,
+                reason="No incident text remained after embedding budget limits.",
+            )
+            return self._state_update(state, run, [], [])
+
         if self.embedder is None:
             run = EmbeddingRun(
                 embedded_text_count=len(redacted_texts),
@@ -44,12 +66,27 @@ class EmbeddingAgent:
             )
             return self._state_update(state, run, redacted_texts, [])
 
+        cooldown_remaining = self._rate_limit_cooldown_remaining()
+        if cooldown_remaining > 0:
+            run = EmbeddingRun(
+                embedded_text_count=len(redacted_texts),
+                vector_count=0,
+                skipped=True,
+                reason=(
+                    "Embedding generation skipped because GenAI Hub recently returned a "
+                    f"rate limit response. Cooldown remaining: {cooldown_remaining:.0f}s."
+                ),
+            )
+            return self._state_update(state, run, redacted_texts, [])
+
         try:
             vectors = self.embedder.embed(
                 input_text=redacted_texts,
                 model=self.settings.llm_embedding_model,
             )
         except Exception as exc:  # noqa: BLE001 - embedding must not fail incident persistence
+            if _is_rate_limit_error(exc):
+                self._start_rate_limit_cooldown()
             run = EmbeddingRun(
                 embedded_text_count=len(redacted_texts),
                 vector_count=0,
@@ -101,6 +138,42 @@ class EmbeddingAgent:
         if isinstance(value, list) and value:
             texts.append(f"{label}: {', '.join(str(item) for item in value)}")
 
+    def _budget_texts(self, texts: list[str]) -> list[str]:
+        max_texts = self.settings.embedding_max_texts
+        per_text_limit = self.settings.embedding_text_max_chars
+        total_limit = self.settings.embedding_total_max_chars
+        budgeted: list[str] = []
+        seen: set[str] = set()
+        used_chars = 0
+
+        for raw_text in texts:
+            text = " ".join(str(raw_text).split())
+            if not text:
+                continue
+            if len(text) > per_text_limit:
+                text = text[:per_text_limit].rstrip()
+            remaining = total_limit - used_chars
+            if remaining <= 0 or len(budgeted) >= max_texts:
+                break
+            if len(text) > remaining:
+                text = text[:remaining].rstrip()
+            if not text or text in seen:
+                continue
+            budgeted.append(text)
+            seen.add(text)
+            used_chars += len(text)
+        return budgeted
+
+    def _rate_limit_cooldown_remaining(self) -> float:
+        if self.settings.embedding_rate_limit_cooldown_seconds <= 0:
+            return 0.0
+        return max(0.0, _EMBEDDING_RATE_LIMITED_UNTIL - time.monotonic())
+
+    def _start_rate_limit_cooldown(self) -> None:
+        global _EMBEDDING_RATE_LIMITED_UNTIL
+        cooldown = self.settings.embedding_rate_limit_cooldown_seconds
+        _EMBEDDING_RATE_LIMITED_UNTIL = time.monotonic() + cooldown if cooldown > 0 else 0.0
+
     def _state_update(
         self,
         state: AgentGraphState,
@@ -119,3 +192,14 @@ class EmbeddingAgent:
             "embedding_vectors": vectors,
             "agent_events": [*state.get("agent_events", []), event.model_dump(mode="json")],
         }
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "429" in message
+        or "rate limit" in message
+        or "ratelimit" in message
+        or "tpm limit" in message
+        or "too many requests" in message
+    )

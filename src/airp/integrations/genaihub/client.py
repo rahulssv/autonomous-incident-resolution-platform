@@ -34,6 +34,7 @@ class GenAIHubClient:
             api_key=self.settings.gateway_api_key,
             base_url=str(self.settings.gateway_base_url).rstrip("/"),
             http_client=self._build_http_client(),
+            max_retries=self.settings.gateway_max_retries,
         )
 
     def _build_http_client(self) -> httpx.Client:

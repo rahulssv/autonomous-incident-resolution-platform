@@ -1,9 +1,0 @@
-sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
-sudo sh -c 'echo -e "[azure-cli]\nname=Azure CLI\nbaseurl=https://packages.microsoft.com/yumrepos/azure-clinenabled=1ngpgcheck=1ngpgkey=https://packages.micr… > /etc/yum.repos.d/azure-cli.repo'
-sudo dnf install azure-cli
-az version
-az --version
-az login
-az account set --subscription f66e3534-fa8f-4208-9401-28f5e63b971a
-az aks get-credentials --resource-group Semicolon-AIRP-rg --name AIRP-cluster-high-per --overwrite-existing
-cat /home/rahulssv/.kube/config
