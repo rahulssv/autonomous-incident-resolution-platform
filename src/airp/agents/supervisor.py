@@ -69,20 +69,8 @@ class LangGraphSupervisor:
         graph.add_edge(START, "monitoring")
         graph.add_edge("monitoring", "correlation")
         graph.add_edge("correlation", "rca")
-        graph.add_conditional_edges(
-            "rca",
-            self._route_after_rca,
-            {
-                "remediation": "remediation",
-                "documentation": "documentation",
-            },
-        )
+        graph.add_edge("rca", "remediation")
         graph.add_edge("remediation", "documentation")
         graph.add_edge("documentation", "embedding")
         graph.add_edge("embedding", END)
         return graph.compile()
-
-    def _route_after_rca(self, state: AgentGraphState) -> str:
-        if state.get("rca_hypotheses"):
-            return "remediation"
-        return "documentation"

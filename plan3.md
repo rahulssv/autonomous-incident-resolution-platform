@@ -32,6 +32,9 @@ Already implemented:
 - RCA safety hardening for unsupported claims, low-confidence escalation, prompt-injection text in evidence, and scenario fixtures.
 - Read APIs for incident evidence, tool calls, model calls, and RCA hypotheses.
 - Disabled-by-default external action policy flags and shared artifact idempotency helper for future GitHub, Slack, PR, and documentation writes.
+- Remediation Agent LangGraph node with typed output, prompt, deterministic fallback, policy grounding, and internal remediation-plan persistence.
+- Documentation Agent LangGraph node with typed report-draft output, prompt, deterministic fallback, and publishing disabled by policy.
+- LangGraph supervisor route now runs Monitoring, Correlation, RCA, Remediation, Documentation, and Embedding in sequence.
 - Live-read configuration scaffolding for Kubernetes MCP, GitHub MCP, and DockerHub, including endpoint settings, read timeouts, retry settings, namespace/repository allowlists, readiness checks, and failure timeline events.
 - Dockerfile, Docker Compose, Helm chart, AKS helper script, migration script, deployment docs, and verification script.
 - Helm deployment defaults expose the read-only evidence configuration and use `/api/readiness` for API readiness probing.
@@ -40,7 +43,7 @@ Already implemented:
 Still not production complete:
 
 - Full Temporal workflow execution is not complete beyond the MVP workflow skeleton.
-- LangGraph supervisor MVP is implemented through Monitoring, Correlation, RCA evidence planning, RCA hypotheses, and Embedding, but Remediation and Documentation agents remain pending.
+- LangGraph supervisor MVP is implemented through Monitoring, Correlation, RCA evidence planning, RCA hypotheses, Remediation planning, Documentation drafting, and Embedding.
 - Live Kubernetes MCP, live GitHub MCP, Slack, approval UX, and governed repository-write behavior are not end-to-end.
 - PostgreSQL + pgvector has not been fully verified with migrations and integration tests.
 - Entra ID authorization roles are not production-grade yet.
@@ -55,7 +58,7 @@ Verified from the current repository on 2026-05-16:
 - Monitoring Agent is implemented as a LangGraph node with structured output validation.
 - Embedding Agent is implemented as a LangGraph node with redaction before embedding calls.
 - Correlation and RCA Agent skeletons are implemented as LangGraph nodes.
-- Documentation and Remediation agents are not implemented as LangGraph nodes yet.
+- Documentation and Remediation agents are implemented as LangGraph node foundations with safe deterministic fallbacks and structured GenAI Hub paths.
 - RCA Agent can use a configured read-only evidence collector for Kubernetes MCP, GitHub MCP, and DockerHub evidence.
 - RCA Agent generates typed RCA hypotheses with confidence, evidence refs, contradictions, next actions, and escalation decision.
 - RCA Agent rejects unsupported or uncited model claims, escalates low-confidence output, and sanitizes untrusted evidence before prompt construction.
@@ -68,9 +71,9 @@ Verified from the current repository on 2026-05-16:
 - RCA evidence collection records unavailable, forbidden, and timeout outcomes as visible incident timeline events.
 - RCA evidence persistence stores evidence item payload hashes and tool-call parameter/result hashes.
 - RCA fallback reasoning uses DockerHub `source_commit_sha` when present, but full AKS image ID to DockerHub digest to GitHub commit correlation is still pending.
-- Current Temporal workflow invokes a LangGraph supervisor through the `agent_graph_run` activity.
-- Current GenAI Hub integration is used as an optional LLM/embedding adapter; RCA prompt/model-call persistence is implemented, while broader production prompt templates are still pending.
-- Current verification baseline is `./scripts/verify.sh` with 61 passing tests.
+- Current Temporal workflow invokes a LangGraph supervisor through the `agent_graph_run` activity and persists RCA artifacts plus proposed remediation plans.
+- Current GenAI Hub integration is used as an optional LLM/embedding adapter; RCA, Remediation, and Documentation prompt/model-call paths are implemented, while shared prompt loading and production evals are still pending.
+- Current verification baseline is `./scripts/verify.sh` with 65 passing tests.
 
 ## Remaining Work Summary
 
@@ -84,7 +87,7 @@ The remaining product work is:
 - Kubernetes MCP implementation for pod logs, events, deployments, rollout state, replica sets, redaction, and evidence storage.
 - GitHub MCP implementation for repository history, issues, branches, file writes through PR branches, draft PRs, comments, and artifact persistence.
 - Slack notification, signed approval callbacks, threaded updates, replay protection, and approval expiry.
-- LangGraph expansion from the current Monitoring, Correlation, RCA evidence/hypothesis, and Embedding MVP into live RCA evidence collection, Remediation, Documentation, graph checkpoints, graph resume, and graph execution audit.
+- LangGraph expansion from the current Monitoring, Correlation, RCA evidence/hypothesis, Remediation planning, Documentation drafting, and Embedding MVP into graph checkpoints, graph resume, external artifact governance, and graph execution audit.
 - GenAI Hub production agent controls beyond the RCA prompt: shared prompt loading, model fallback policy, token/cost tracking, groundedness rules, prompt-injection hardening, and eval fixtures.
 - Incident memory: pgvector-backed embeddings, semantic search, background embedding jobs, ranking tests, and secret-safe embedding policy.
 - End-to-end RCA, remediation, documentation, and knowledge-loop behavior.
@@ -398,7 +401,7 @@ Tasks:
 - [x] Add read-only RCA tool-call recording boundary for Kubernetes MCP, GitHub MCP, and DockerHub.
 - [x] Implement LangGraph supervisor skeleton that routes Monitoring to Embedding.
 - [x] Extend LangGraph supervisor routing to Correlation and RCA agents.
-- [ ] Extend LangGraph supervisor routing to Remediation and Documentation agents.
+- [x] Extend LangGraph supervisor routing to Remediation and Documentation agents.
 - [ ] Add graph checkpoints using PostgreSQL or Redis-backed durable state.
 - [ ] Add graph resume behavior after worker restart.
 - [ ] Add graph-level idempotency keys for external artifact creation.
@@ -429,15 +432,17 @@ Tasks:
 - [x] RCA Agent: produce ranked hypotheses with confidence, evidence IDs, contradictions, and next actions.
 - [ ] RCA Agent: create exactly one idempotent GitHub issue when policy allows.
 - [ ] RCA Agent: send Slack incident notification when policy allows.
-- [ ] Add Remediation Agent graph node.
-- [ ] Add Remediation Agent prompt and structured output.
-- [ ] Remediation Agent: read RCA evidence, GitHub issue, repository context, and service policy.
-- [ ] Remediation Agent: generate remediation plan, test plan, rollback plan, risk score, approval requirement, and blocked-file analysis.
+- [x] Add Remediation Agent graph node.
+- [x] Add Remediation Agent prompt and structured output.
+- [x] Remediation Agent: read RCA evidence, repository context, and service policy.
+- [x] Remediation Agent: generate remediation plan, test plan, rollback plan, risk score, approval requirement, and blocked-path findings.
+- [ ] Remediation Agent: enrich planning with created GitHub issue context after issue creation is enabled.
 - [ ] Remediation Agent: wait for approval signal before repository write actions.
 - [ ] Remediation Agent: create branch and draft PR through GitHub MCP after approval only.
-- [ ] Add Documentation Agent graph node.
-- [ ] Add Documentation Agent prompt and structured output.
-- [ ] Documentation Agent: generate final RCA report from timeline, evidence, hypotheses, issue, PR, Slack thread, approval, and outcome.
+- [x] Add Documentation Agent graph node.
+- [x] Add Documentation Agent prompt and structured output.
+- [x] Documentation Agent: generate RCA report draft from timeline, evidence, hypotheses, and remediation plan.
+- [ ] Documentation Agent: enrich final report with GitHub issue, PR, Slack thread, approval, and outcome after those artifacts exist.
 - [ ] Documentation Agent: store final report and publish to configured wiki target when enabled.
 - [x] Add Embedding Agent graph node.
 - [x] Add Embedding Agent prompt-free embedding workflow using GenAI Hub `embeddings`.
@@ -448,14 +453,14 @@ Tasks:
 - [ ] Embedding Agent: retry embedding failures without blocking urgent remediation.
 - [x] Add typed Pydantic output schemas for Monitoring and Embedding agents.
 - [x] Add typed Pydantic output schemas for Correlation and RCA agents.
-- [ ] Add typed Pydantic output schemas for Remediation and Documentation agents.
+- [x] Add typed Pydantic output schemas for Remediation and Documentation agents.
 - [x] Persist RCA model calls with prompt version, model name, latency, response hash, validation result, and incident ID.
 - [ ] Persist token counts for model calls when gateway usage metadata is available.
 - [ ] Add model fallback policy by incident severity.
 - [ ] Add token and cost estimation.
 - [ ] Add rate-limit and timeout escalation behavior.
 - [x] Require RCA hypothesis evidence refs and persist stored evidence ID links when evidence items are stored.
-- [ ] Require evidence citations for remediation outputs.
+- [x] Require evidence citations for remediation outputs.
 - [x] Add deterministic low-evidence escalation fallback for RCA hypotheses.
 - [x] Reject unsupported RCA claims from model output.
 - [x] Add RCA prompt-injection hardening for Kubernetes logs and GitHub content.
@@ -465,6 +470,7 @@ Tasks:
 - [x] Add LangGraph node tests with mocked GenAI Hub and embedding dependencies.
 - [x] Add LangGraph node tests with fixture-backed service/workload correlation.
 - [x] Add LangGraph RCA node tests with mocked Kubernetes MCP, GitHub MCP, and DockerHub dependencies.
+- [x] Add LangGraph node tests for Remediation and Documentation nodes with mocked GenAI Hub outputs and deterministic fallbacks.
 - [ ] Add LangGraph node tests with mocked Slack and pgvector dependencies.
 - [ ] Add graph replay/resume tests.
 - [x] Add RCA golden fixtures for high latency, crash loop, bad deployment, config error, and failed deployment scenarios.
@@ -549,9 +555,9 @@ Tasks:
 
 - [ ] Define remediation policy schema.
 - [ ] Configure risk levels, max changed files, protected paths, required tests, and approval rules.
-- [ ] Generate remediation plan from RCA evidence.
-- [ ] Generate rollback plan.
-- [ ] Store remediation plan and rollback plan.
+- [x] Generate remediation plan from RCA evidence.
+- [x] Generate rollback plan.
+- [x] Store remediation plan and rollback plan.
 - [ ] Request approval through API and Slack.
 - [ ] Wait for approval workflow signal.
 - [ ] Block PR creation until approval when required.
@@ -576,8 +582,9 @@ Goal: close incidents with reusable RCA documentation.
 
 Tasks:
 
-- [ ] Define final RCA report schema.
-- [ ] Generate report from timeline, evidence, hypotheses, GitHub issue, PR, Slack thread, and outcome.
+- [x] Define final RCA report schema.
+- [x] Generate report draft from timeline, evidence, hypotheses, and remediation plan.
+- [ ] Enrich final report with GitHub issue, PR, Slack thread, approval, and outcome.
 - [ ] Store final report in PostgreSQL.
 - [ ] Publish report to selected wiki target when configured.
 - [ ] Add manual republish endpoint.
@@ -876,8 +883,10 @@ Highest-priority remaining engineering tasks:
 - [x] Add disabled-by-default external action policy flags and shared idempotency helper.
 - [ ] Add idempotent GitHub issue creation after RCA policy allows it.
 - [ ] Add Slack notification, signed approval callback, replay protection, and threaded updates.
-- [ ] Add Remediation Agent graph node, policy guardrails, approval wait, branch creation, and draft PR creation.
-- [ ] Add Documentation Agent graph node, final RCA report storage, publishing, and embedding.
+- [x] Add Remediation Agent graph node foundation with typed schema, policy grounding, safe planning, and internal plan persistence.
+- [ ] Add Remediation Agent approval wait, branch creation, blocked-path policy, and draft PR creation.
+- [x] Add Documentation Agent graph node foundation with typed schema and report draft generation.
+- [ ] Add Documentation Agent final RCA report storage, publishing, and embedding.
 - [ ] Add vector-backed semantic search and ranking tests.
 - [ ] Add API endpoints for GitHub artifacts, Slack messages, audit export, policy management, discovery refresh, and report republish.
 - [ ] Add CI/CD workflows for lint, tests, migrations, Docker build, image scanning, SBOM, Helm checks, release, deployment, and rollback.
@@ -949,8 +958,10 @@ Live read integrations:
 
 Agent layer:
 
-- [ ] Add Remediation Agent as a LangGraph node with typed schema, prompt, tests, policy guardrails, approval wait, and draft PR path.
-- [ ] Add Documentation Agent as a LangGraph node with typed schema, prompt, final RCA report storage, publishing flag, and embedding path.
+- [x] Add Remediation Agent as a LangGraph node with typed schema, prompt, tests, and policy guardrails.
+- [ ] Add Remediation Agent approval wait and draft PR path.
+- [x] Add Documentation Agent as a LangGraph node with typed schema, prompt, tests, report draft generation, and publishing flag.
+- [ ] Add Documentation Agent final RCA report storage and embedding path.
 - [ ] Add graph checkpoints, graph resume behavior, graph versioning, and graph execution trace export.
 - [ ] Add graph-level timeout, retry, escalation, and idempotency rules.
 - [ ] Add shared prompt template loader and versioning beyond the RCA prompt.
@@ -1113,20 +1124,40 @@ Verification:
 
 - `./scripts/verify.sh` passes with 61 tests.
 
-## Immediate Next Sprint
+## Completed Sprint: Remediation and Documentation Agent Foundations
 
 Sprint goal: add Remediation and Documentation LangGraph node foundations without enabling external writes.
 
 Tasks:
 
-1. [ ] Define typed Remediation Agent output schema with remediation plan, rollback plan, test plan, risk score, approval requirement, and blocked-path findings.
-2. [ ] Implement Remediation Agent LangGraph node that reads RCA hypotheses, evidence summaries, repository context, and policy flags.
-3. [ ] Persist generated remediation plan records without creating branches or PRs.
-4. [ ] Define typed Documentation Agent output schema for final RCA report drafts.
-5. [ ] Implement Documentation Agent LangGraph node that drafts a final report from timeline/evidence/hypotheses when invoked.
-6. [ ] Extend the supervisor graph routing to include Remediation and Documentation nodes behind safe conditions.
-7. [ ] Add unit tests for Remediation and Documentation nodes with mocked GenAI Hub outputs and deterministic fallbacks.
-8. [ ] Keep GitHub issue creation, Slack sends, remediation PR creation, and documentation publishing disabled.
+1. [x] Define typed Remediation Agent output schema with remediation plan, rollback plan, test plan, risk score, approval requirement, and blocked-path findings.
+2. [x] Implement Remediation Agent LangGraph node that reads RCA hypotheses, evidence summaries, repository context, and policy flags.
+3. [x] Persist generated remediation plan records without creating branches or PRs.
+4. [x] Define typed Documentation Agent output schema for final RCA report drafts.
+5. [x] Implement Documentation Agent LangGraph node that drafts a final report from timeline, evidence, hypotheses, and remediation plan when invoked.
+6. [x] Extend the supervisor graph routing to include Remediation and Documentation nodes behind safe policy gates.
+7. [x] Add unit tests for Remediation and Documentation nodes with mocked GenAI Hub outputs and deterministic fallbacks.
+8. [x] Keep GitHub issue creation, Slack sends, remediation PR creation, and documentation publishing disabled.
+
+Verification:
+
+- `ruff check src tests` passes.
+- `pytest tests/unit/test_agents.py -q` passes with 11 tests.
+- `./scripts/verify.sh` passes with 65 tests.
+
+## Immediate Next Sprint
+
+Sprint goal: persist documentation drafts and expose remediation/documentation artifacts through backend APIs without enabling external publishing.
+
+Tasks:
+
+1. [ ] Add a PostgreSQL model, schema, and migration for final RCA documentation report drafts.
+2. [ ] Persist Documentation Agent report drafts from `agent_graph_run`.
+3. [ ] Add `GET /api/incidents/{incident_id}/remediation-plans` for operator inspection.
+4. [ ] Add `GET /api/incidents/{incident_id}/documentation-reports` for report draft inspection.
+5. [ ] Extend Embedding Agent input collection to include remediation summaries and documentation drafts while keeping pgvector persistence pending.
+6. [ ] Add unit and API tests for remediation plan listing and documentation report persistence.
+7. [ ] Keep wiki publishing, Slack sends, GitHub issue creation, and remediation PR creation disabled until approval and policy layers are complete.
 
 ## Verified Remaining Critical Path
 
@@ -1134,7 +1165,7 @@ Verified from the repository on 2026-05-16:
 
 1. Live validation: validate Kubernetes MCP, GitHub MCP, and DockerHub read transports against deployed AIRP-client infrastructure and public AIRP-client images.
 2. Governance: wire the existing feature flags, idempotency helper, repository allowlists, and namespace allowlists into future write paths, then add approval policy and blocked-path policy before any GitHub or Slack writes.
-3. Agent completion: implement Remediation and Documentation as LangGraph nodes with typed Pydantic outputs, prompts, tests, and workflow states.
+3. Agent completion: extend the new Remediation and Documentation node foundations with report storage, approval workflow states, final artifact enrichment, and governed external writes.
 4. Memory: add pgvector migration, persist embedding vectors, and switch incident search to vector-backed ranking when query text is present.
 5. APIs: add GitHub artifact, Slack message, audit export, policy, discovery refresh, workflow-state, and documentation republish endpoints.
 6. Operations: add metrics, health/readiness checks, request/correlation ID middleware, structured logging, CI/CD workflows, scans, SBOM, and AKS production validation.
