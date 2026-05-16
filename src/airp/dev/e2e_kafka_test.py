@@ -159,11 +159,11 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=float(os.getenv("AIRP_E2E_CLOSE_TIMEOUT_SECONDS", "60")),
     )
-    parser.add_argument("--service", default=os.getenv("AIRP_E2E_SERVICE", "checkout-api"))
+    parser.add_argument("--service", default=os.getenv("AIRP_E2E_SERVICE", "s1-checkout"))
     parser.add_argument("--namespace", default=os.getenv("AIRP_E2E_NAMESPACE", "shopfast"))
     parser.add_argument("--environment", default=os.getenv("AIRP_E2E_ENVIRONMENT", "prod"))
-    parser.add_argument("--pod", default=os.getenv("AIRP_E2E_POD", "checkout-api-e2e"))
-    parser.add_argument("--deployment", default=os.getenv("AIRP_E2E_DEPLOYMENT", "checkout-api"))
+    parser.add_argument("--pod", default=os.getenv("AIRP_E2E_POD", "s1-checkout-e2e"))
+    parser.add_argument("--deployment", default=os.getenv("AIRP_E2E_DEPLOYMENT", "s1-checkout"))
     parser.add_argument(
         "--alert-name",
         default=os.getenv("AIRP_E2E_ALERT_NAME", "AIRPE2ECheckoutLatency"),

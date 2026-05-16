@@ -37,11 +37,14 @@ class Settings(BaseSettings):
     gateway_base_url: AnyHttpUrl | None = None
     gateway_api_key: str | None = None
     gateway_max_retries: int = Field(default=0, ge=0, le=5)
-    llm_monitoring_model: str = "gpt-4.1-nano"
-    llm_correlation_model: str = "gpt-4.1"
-    llm_rca_model: str = "gpt-5.2-CIO"
-    llm_remediation_model: str = "gpt-5.2-CIO"
-    llm_documentation_model: str = "gpt-4.1"
+    anthropic_base_url: AnyHttpUrl | None = None
+    anthropic_auth_token: str | None = None
+    anthropic_max_retries: int = Field(default=2, ge=0, le=5)
+    llm_monitoring_model: str = "claude-haiku-4-5-20251001"
+    llm_correlation_model: str = "claude-sonnet-4-6"
+    llm_rca_model: str = "claude-opus-4-7"
+    llm_remediation_model: str = "claude-opus-4-7"
+    llm_documentation_model: str = "claude-sonnet-4-6"
     llm_embedding_model: str = "embeddings"
     embedding_enabled: bool = True
     embedding_max_texts: int = Field(default=16, ge=1, le=50)
@@ -141,6 +144,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "gateway_base_url",
+        "anthropic_base_url",
         "kubernetes_mcp_url",
         "github_mcp_url",
         "slack_webhook_url",
