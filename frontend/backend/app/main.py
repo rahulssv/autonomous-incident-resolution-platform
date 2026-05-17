@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, AsyncIterator, Literal
 
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import airp_graph_service
+from .airp_client import shutdown_airp_client
 from .auth import router as auth_router, token_from_request
 from .config import settings
 from .graph_service import GRAPH_STAGES, stream_demo_resolution
@@ -17,6 +20,8 @@ from .graph_service import (
     list_resolution_incidents,
     stream_incident_resolution,
 )
+
+logger = logging.getLogger(__name__)
 from .github_client import GitHubAPIError, GitHubClient
 from .github_service import (
     build_user_activity,
@@ -89,6 +94,9 @@ async def health() -> dict[str, str | bool]:
             settings.github_oauth_client_id and settings.github_oauth_client_secret
         ),
         "githubApiVersion": settings.github_api_version,
+        "airpBackendEnabled": settings.airp_backend_enabled,
+        "airpServiceTokenConfigured": bool(settings.airp_service_token),
+        "airpApiBaseUrl": settings.airp_api_base_url,
     }
 
 
@@ -264,21 +272,59 @@ async def graph_demo_resolution(
 
 @app.get("/api/graph/incidents")
 async def graph_incidents() -> dict:
+    if settings.airp_backend_enabled:
+        try:
+            return await airp_graph_service.list_resolution_incidents()
+        except Exception as exc:  # noqa: BLE001 - fall back to demo data
+            logger.warning("airp list_resolution_incidents failed, using demo: %s", exc)
     return list_resolution_incidents()
 
 
 @app.get("/api/graph/incidents/{incident_id}")
 async def graph_incident_detail(incident_id: str) -> JSONResponse:
+    if settings.airp_backend_enabled:
+        try:
+            detail = await airp_graph_service.get_resolution_incident(incident_id)
+            if detail:
+                return JSONResponse(detail)
+        except Exception as exc:  # noqa: BLE001 - fall back to demo data
+            logger.warning(
+                "airp get_resolution_incident failed for %s, using demo: %s",
+                incident_id,
+                exc,
+            )
     detail = get_resolution_incident(incident_id)
     if not detail:
         return JSONResponse({"detail": "Graph incident not found"}, status_code=404)
     return JSONResponse(detail)
 
 
+async def _stream_resolution(incident_id: str) -> AsyncIterator[str]:
+    if settings.airp_backend_enabled:
+        gen = airp_graph_service.stream_incident_resolution(incident_id)
+        try:
+            first_chunk = await gen.__anext__()
+        except StopAsyncIteration:
+            return
+        except Exception as exc:  # noqa: BLE001 - fall back to demo stream
+            logger.warning(
+                "airp stream_incident_resolution failed for %s, using demo: %s",
+                incident_id,
+                exc,
+            )
+        else:
+            yield first_chunk
+            async for chunk in gen:
+                yield chunk
+            return
+    async for chunk in stream_incident_resolution(incident_id):
+        yield chunk
+
+
 @app.get("/api/graph/incidents/{incident_id}/stream")
 async def graph_incident_stream(incident_id: str) -> StreamingResponse:
     return StreamingResponse(
-        stream_incident_resolution(incident_id),
+        _stream_resolution(incident_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -286,6 +332,11 @@ async def graph_incident_stream(incident_id: str) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.on_event("shutdown")
+async def _shutdown_airp_client() -> None:
+    await shutdown_airp_client()
 
 
 def _frontend_dist_dir() -> Path | None:

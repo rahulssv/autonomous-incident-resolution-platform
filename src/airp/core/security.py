@@ -1,3 +1,4 @@
+import hmac
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -191,6 +192,18 @@ def get_entra_validator() -> EntraJWTValidator:
     return EntraJWTValidator(get_settings())
 
 
+def _service_principal(settings: Settings) -> Principal:
+    return Principal(
+        subject="service-account:internal-proxy",
+        tenant_id=settings.entra_tenant_id or "service",
+        name="Internal Proxy",
+        username="service-account",
+        roles=list(AIRP_READ_ROLES),
+        scopes=[],
+        claims={"source": "service_token"},
+    )
+
+
 async def get_current_principal(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Security(bearer_scheme)],
     settings: Annotated[Settings, Depends(get_settings)],
@@ -207,6 +220,10 @@ async def get_current_principal(
             detail="Missing bearer token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if settings.service_token and hmac.compare_digest(
+        credentials.credentials, settings.service_token
+    ):
+        return _service_principal(settings)
     return validator.validate(credentials.credentials)
 
 

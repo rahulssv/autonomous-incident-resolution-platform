@@ -75,6 +75,18 @@ class Settings:
             "GITHUB_AGENT_PR_LABEL_FILTER", "agentic-remediation,ai-remediation"
         )
     )
+    airp_api_base_url: str = os.getenv("AIRP_API_BASE_URL", "http://api:8080").rstrip("/")
+    airp_service_token: str | None = _secret_env("AIRP_SERVICE_TOKEN")
+    airp_backend_enabled: bool = os.getenv("AIRP_BACKEND_ENABLED", "false").lower() == "true"
+    airp_request_timeout_seconds: float = float(
+        os.getenv("AIRP_REQUEST_TIMEOUT_SECONDS", "10")
+    )
+    airp_stream_poll_interval_seconds: float = float(
+        os.getenv("AIRP_STREAM_POLL_INTERVAL_SECONDS", "2.0")
+    )
+    airp_stream_poll_max_iterations: int = int(
+        os.getenv("AIRP_STREAM_POLL_MAX_ITERATIONS", "150")
+    )
 
 
 settings = Settings()

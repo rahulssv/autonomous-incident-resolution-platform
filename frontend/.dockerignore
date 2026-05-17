@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+.env.*
+*.pdf
+*.log
+README.md
+backend/oauth-debug.log
+backend/__pycache__
+backend/app/__pycache__
