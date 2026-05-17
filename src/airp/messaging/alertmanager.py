@@ -302,15 +302,22 @@ def _normalize_azure_event_record(record: dict[str, Any]) -> list[NormalizedAler
     )
     alert_name = reason or event_type or "AzureEvent"
     description = message or f"Azure event {alert_name} was received from Event Hubs."
-    fingerprint = _azure_event_fingerprint(
-        alert_name=alert_name,
-        service=service,
-        namespace=namespace,
-        pod_name=pod_name,
-        deployment=deployment,
-        image_tag=image_tag,
-        message=description,
-    ) or _first_present(record, "id", "correlationId", "operationId") or _stable_hash(record)
+    # Identity at deployment/image level dedupes the same problem firing across
+    # many pods or messages. When no workload identity is present, fall back to
+    # a STABLE (namespace, service, alert_name) key rather than a per-event ID
+    # so repeated firings within the Redis dedupe TTL collapse into one incident.
+    fingerprint = (
+        _azure_event_fingerprint(
+            alert_name=alert_name,
+            service=service,
+            namespace=namespace,
+            pod_name=pod_name,
+            deployment=deployment,
+            image_tag=image_tag,
+            message=description,
+        )
+        or f"azure-event:{namespace or 'default'}:{service}:{alert_name}"
+    )
     status = _status_from_azure_condition(
         _first_present(body, "status", "monitorCondition", "type")
     )
@@ -452,16 +459,17 @@ def _azure_event_fingerprint(
     alert_name: str,
     service: str,
     namespace: str | None,
-    pod_name: str | None,
+    pod_name: str | None,  # noqa: ARG001 - kept for backward compat, intentionally unused
     deployment: str | None,
     image_tag: str | None,
-    message: str | None,
+    message: str | None,  # noqa: ARG001 - kept for backward compat, intentionally unused
 ) -> str | None:
-    workload = deployment or pod_name
+    # Workload identity is at deployment/image granularity only. Pod names carry
+    # K8s random suffixes and message contents change per firing; including them
+    # would defeat dedup of the same underlying issue across replicas.
+    workload = deployment
     if not workload and image_tag:
         workload = f"image:{_stable_hash(image_tag)[:16]}"
-    if not workload and message:
-        workload = f"message:{_stable_hash(message)[:16]}"
     if not workload:
         return None
     return ":".join(

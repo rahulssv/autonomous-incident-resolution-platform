@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     entra_allowed_issuers: list[str] = Field(default_factory=list)
     entra_discovery_cache_ttl_seconds: int = Field(default=3600, ge=60)
     entra_discovery_timeout_seconds: float = Field(default=5.0, gt=0.0)
+    service_token: str | None = None
 
     gateway_base_url: AnyHttpUrl | None = None
     gateway_api_key: str | None = None
