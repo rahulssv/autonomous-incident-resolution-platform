@@ -75,7 +75,11 @@ echo "[airp-e2e] Using Temporal task queue: ${AIRP_TEMPORAL_TASK_QUEUE}"
 docker compose up -d api
 
 echo "[airp-e2e] Starting temporary Temporal worker: ${TEMPORAL_CONTAINER}"
-docker compose run -d --name "${TEMPORAL_CONTAINER}" --no-deps api \
+docker compose run -d --name "${TEMPORAL_CONTAINER}" --no-deps \
+  -e AIRP_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITIES="${AIRP_E2E_WORKER_MAX_CONCURRENT_ACTIVITIES:-4}" \
+  -e AIRP_TEMPORAL_WORKER_MAX_ACTIVITIES_PER_SECOND="${AIRP_E2E_WORKER_MAX_ACTIVITIES_PER_SECOND:-5}" \
+  -e AIRP_TEMPORAL_WORKER_ACTIVITY_EXECUTOR_THREADS="${AIRP_E2E_WORKER_ACTIVITY_EXECUTOR_THREADS:-4}" \
+  api \
   python -m airp.workers.temporal_worker >/dev/null
 wait_container_running "${TEMPORAL_CONTAINER}"
 

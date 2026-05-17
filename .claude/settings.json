@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker rm *)",
+      "Bash(xargs -r docker rm -f)"
+    ]
+  }
+}

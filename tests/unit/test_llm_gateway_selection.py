@@ -22,6 +22,21 @@ def test_agent_factory_prefers_anthropic_gateway_when_configured() -> None:
 
     assert isinstance(supervisor.monitoring_agent.llm_client, AnthropicGatewayClient)
     assert supervisor.rca_agent.llm_client is supervisor.monitoring_agent.llm_client
+    # Anthropic-style gateways do not expose /v1/embeddings, so the embedder must
+    # route to the GenAI Hub gateway when it is also configured.
+    assert isinstance(supervisor.embedding_agent.embedder, GenAIHubClient)
+
+
+def test_agent_factory_uses_anthropic_for_embeddings_when_genaihub_not_configured() -> None:
+    supervisor = build_default_agent_supervisor(
+        Settings(
+            _env_file=None,
+            anthropic_base_url="https://anthropic.example.test/v1",
+            anthropic_auth_token="test-token",
+        )
+    )
+
+    assert isinstance(supervisor.monitoring_agent.llm_client, AnthropicGatewayClient)
     assert supervisor.embedding_agent.embedder is supervisor.monitoring_agent.llm_client
 
 

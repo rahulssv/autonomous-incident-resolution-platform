@@ -23,6 +23,16 @@ def build_default_agent_supervisor(settings: Settings | None = None) -> LangGrap
     elif settings.gateway_base_url and settings.gateway_api_key:
         genai_client = GenAIHubClient(settings)
 
+    # The Anthropic-style gateway does not expose an OpenAI-compatible /v1/embeddings
+    # route, so prefer the GenAI Hub gateway for embeddings when it is configured.
+    embedding_client = genai_client
+    if (
+        isinstance(genai_client, AnthropicGatewayClient)
+        and settings.gateway_base_url
+        and settings.gateway_api_key
+    ):
+        embedding_client = GenAIHubClient(settings)
+
     evidence_collector = None
     if settings.agent_read_only_evidence_enabled:
         evidence_collector = RCAEvidenceCollector(
@@ -59,5 +69,5 @@ def build_default_agent_supervisor(settings: Settings | None = None) -> LangGrap
         ),
         remediation_agent=RemediationAgent(settings=settings, llm_client=genai_client),
         documentation_agent=DocumentationAgent(settings=settings, llm_client=genai_client),
-        embedding_agent=EmbeddingAgent(settings=settings, embedder=genai_client),
+        embedding_agent=EmbeddingAgent(settings=settings, embedder=embedding_client),
     )
