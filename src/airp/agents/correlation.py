@@ -16,7 +16,7 @@ class CorrelationAgent:
         return {
             "correlation_result": result.model_dump(mode="json"),
             "next_action": result.recommended_next_agent,
-            "agent_events": [*state.get("agent_events", []), event.model_dump(mode="json")],
+            "agent_events": [event.model_dump(mode="json")],
         }
 
     def correlate(self, state: AgentGraphState) -> CorrelationResult:

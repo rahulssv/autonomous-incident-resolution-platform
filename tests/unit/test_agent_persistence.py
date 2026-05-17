@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from airp.workflows.activities import (
+from backend.src.airp.workflows.activities import (
     _persist_documentation_output,
     _persist_embedding_output,
 )

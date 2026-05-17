@@ -3,13 +3,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from airp.db.models.base import uuid_str
-from airp.db.models.incident import Incident, IncidentEvent
-from airp.messaging.dedupe import InMemoryDedupeStore
-from airp.schemas.incidents import IncidentCreate
-from airp.services.alert_ingestion_service import AlertIngestionService
-from airp.services.incident_service import IncidentService
-from airp.workflows.client import WorkflowStartResult
+from backend.src.airp.db.models.base import uuid_str
+from backend.src.airp.db.models.incident import Incident, IncidentEvent
+from backend.src.airp.messaging.dedupe import InMemoryDedupeStore
+from backend.src.airp.schemas.incidents import IncidentCreate
+from backend.src.airp.services.alert_ingestion_service import AlertIngestionService
+from backend.src.airp.services.incident_service import IncidentService
+from backend.src.airp.workflows.client import WorkflowStartResult
 
 
 class FakeSession:

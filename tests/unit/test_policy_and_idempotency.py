@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from airp.core.config import Settings
-from airp.core.idempotency import artifact_idempotency_marker, build_idempotency_key
-from airp.core.policy import ExternalActionPolicy
-from airp.services.policy_service import build_effective_policy
+from backend.src.airp.core.config import Settings
+from backend.src.airp.core.idempotency import artifact_idempotency_marker, build_idempotency_key
+from backend.src.airp.core.policy import ExternalActionPolicy
+from backend.src.airp.services.policy_service import build_effective_policy
 
 
 def test_artifact_idempotency_key_is_stable_and_marker_safe() -> None:

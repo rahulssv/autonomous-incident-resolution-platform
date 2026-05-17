@@ -6,18 +6,18 @@ from typing import Any
 
 import pytest
 
-from airp.agents.evidence import RCAEvidenceCollector
-from airp.agents.rca import RCAAgent
-from airp.agents.state import AgentGraphState, RCAHypothesisOutput, RCAHypothesisSet
-from airp.core.config import Settings
-from airp.integrations.dockerhub.client import DockerHubClient, DockerHubImageEvidence
-from airp.integrations.github_mcp.client import (
+from backend.src.airp.agents.evidence import RCAEvidenceCollector
+from backend.src.airp.agents.rca import RCAAgent
+from backend.src.airp.agents.state import AgentGraphState, RCAHypothesisOutput, RCAHypothesisSet
+from backend.src.airp.core.config import Settings
+from backend.src.airp.integrations.dockerhub.client import DockerHubClient, DockerHubImageEvidence
+from backend.src.airp.integrations.github_mcp.client import (
     GitHubChangedFileEvidence,
     GitHubCommitEvidence,
     GitHubEvidenceBundle,
     GitHubMCPClient,
 )
-from airp.integrations.kubernetes_mcp.client import (
+from backend.src.airp.integrations.kubernetes_mcp.client import (
     KubernetesEventEvidence,
     KubernetesEvidenceBundle,
     KubernetesLogEvidence,

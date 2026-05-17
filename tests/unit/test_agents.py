@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from airp.agents.correlation import CorrelationAgent
-from airp.agents.documentation import DocumentationAgent
-from airp.agents.embedding import EmbeddingAgent
-from airp.agents.evidence import RCAEvidenceCollector
-from airp.agents.monitoring import MonitoringAgent
-from airp.agents.rca import RCAAgent
-from airp.agents.remediation import RemediationAgent
-from airp.agents.state import (
+from backend.src.airp.agents.correlation import CorrelationAgent
+from backend.src.airp.agents.documentation import DocumentationAgent
+from backend.src.airp.agents.embedding import EmbeddingAgent
+from backend.src.airp.agents.evidence import RCAEvidenceCollector
+from backend.src.airp.agents.monitoring import MonitoringAgent
+from backend.src.airp.agents.rca import RCAAgent
+from backend.src.airp.agents.remediation import RemediationAgent
+from backend.src.airp.agents.state import (
     AgentGraphState,
     DocumentationReportDraft,
     MonitoringAssessment,
@@ -17,16 +17,16 @@ from airp.agents.state import (
     RCAHypothesisSet,
     RemediationAgentOutput,
 )
-from airp.agents.supervisor import LangGraphSupervisor
-from airp.core.config import Settings
-from airp.integrations.dockerhub.client import DockerHubClient, DockerHubImageEvidence
-from airp.integrations.github_mcp.client import (
+from backend.src.airp.agents.supervisor import LangGraphSupervisor
+from backend.src.airp.core.config import Settings
+from backend.src.airp.integrations.dockerhub.client import DockerHubClient, DockerHubImageEvidence
+from backend.src.airp.integrations.github_mcp.client import (
     GitHubChangedFileEvidence,
     GitHubCommitEvidence,
     GitHubEvidenceBundle,
     GitHubMCPClient,
 )
-from airp.integrations.kubernetes_mcp.client import (
+from backend.src.airp.integrations.kubernetes_mcp.client import (
     KubernetesEventEvidence,
     KubernetesEvidenceBundle,
     KubernetesLogEvidence,
@@ -591,15 +591,17 @@ async def test_langgraph_supervisor_routes_monitoring_correlation_rca_then_embed
         },
     )
 
-    assert [event["event_type"] for event in state["agent_events"]] == [
+    event_types = [event["event_type"] for event in state["agent_events"]]
+    # remediation.planned and documentation.drafted run in parallel after rca,
+    # so their relative order is not deterministic — assert membership instead.
+    assert event_types[:4] == [
         "monitoring.assessed",
         "correlation.completed",
         "rca.started",
         "rca.hypotheses.generated",
-        "remediation.planned",
-        "documentation.drafted",
-        "embedding.generated",
     ]
+    assert set(event_types[4:6]) == {"remediation.planned", "documentation.drafted"}
+    assert event_types[6] == "embedding.generated"
     assert state["monitoring_assessment"]["affected_service"] == "checkout-api"
     assert state["correlation_result"]["repository_url"] == "https://github.com/AIRP-client/checkout-api"
     assert state["rca_plan"]["status"] == "ready_for_evidence_collection"

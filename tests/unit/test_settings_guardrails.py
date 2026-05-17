@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from airp.core.config import Settings
+from backend.src.airp.core.config import Settings
 
 
 def test_production_settings_accept_valid_auth_and_https_cors() -> None:

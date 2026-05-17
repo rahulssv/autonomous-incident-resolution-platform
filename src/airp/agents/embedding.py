@@ -190,7 +190,7 @@ class EmbeddingAgent:
             "embedding_run": run.model_dump(mode="json"),
             "embedding_texts": texts,
             "embedding_vectors": vectors,
-            "agent_events": [*state.get("agent_events", []), event.model_dump(mode="json")],
+            "agent_events": [event.model_dump(mode="json")],
         }
 
 

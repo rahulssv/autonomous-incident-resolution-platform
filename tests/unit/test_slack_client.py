@@ -3,9 +3,9 @@ import json
 import httpx
 import pytest
 
-from airp.core.config import Settings
-from airp.core.errors import AppError
-from airp.integrations.slack.client import SlackClient
+from backend.src.airp.core.config import Settings
+from backend.src.airp.core.errors import AppError
+from backend.src.airp.integrations.slack.client import SlackClient
 
 
 @pytest.mark.asyncio

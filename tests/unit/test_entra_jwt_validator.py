@@ -5,8 +5,8 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 
-from airp.core.config import Settings
-from airp.core.security import (
+from backend.src.airp.core.config import Settings
+from backend.src.airp.core.security import (
     AIRP_ADMIN_ROLE,
     AIRP_VIEWER_ROLE,
     EntraJWTValidator,

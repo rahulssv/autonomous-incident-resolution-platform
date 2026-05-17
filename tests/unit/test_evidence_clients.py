@@ -5,19 +5,19 @@ import json
 import httpx
 import pytest
 
-from airp.integrations.dockerhub.client import (
+from backend.src.airp.integrations.dockerhub.client import (
     DockerHubClient,
     DockerHubImageEvidence,
     parse_image_reference,
 )
-from airp.integrations.github_mcp.client import (
+from backend.src.airp.integrations.github_mcp.client import (
     GitHubChangedFileEvidence,
     GitHubCommitEvidence,
     GitHubEvidenceBundle,
     GitHubMCPClient,
     GitHubPullRequestEvidence,
 )
-from airp.integrations.kubernetes_mcp.client import (
+from backend.src.airp.integrations.kubernetes_mcp.client import (
     KubernetesDeploymentEvidence,
     KubernetesEvidenceBundle,
     KubernetesLogEvidence,
@@ -26,7 +26,7 @@ from airp.integrations.kubernetes_mcp.client import (
     KubernetesReplicaSetEvidence,
     KubernetesRolloutEvidence,
 )
-from airp.integrations.mcp_http import MCPToolResponseError
+from backend.src.airp.integrations.mcp_http import MCPToolResponseError
 
 
 @pytest.mark.asyncio

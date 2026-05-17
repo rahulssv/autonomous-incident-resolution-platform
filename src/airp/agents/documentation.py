@@ -47,18 +47,13 @@ class DocumentationAgent:
             agent=self.name,
             payload=report.model_dump(mode="json"),
         )
-        model_calls = list(state.get("model_calls", []))
-        if model_call:
-            model_calls.append(model_call)
+        model_calls = [model_call] if model_call else []
 
         return {
             "documentation_report": report.model_dump(mode="json"),
             "model_calls": model_calls,
             "next_action": "embedding",
-            "agent_events": [
-                *state.get("agent_events", []),
-                event.model_dump(mode="json"),
-            ],
+            "agent_events": [event.model_dump(mode="json")],
         }
 
     def generate_report(

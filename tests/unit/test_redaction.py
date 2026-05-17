@@ -1,4 +1,4 @@
-from airp.integrations.genaihub.redaction import redact_payload, redact_text
+from backend.src.airp.integrations.genaihub.redaction import redact_payload, redact_text
 
 
 def test_redact_text_masks_common_secret_patterns() -> None:

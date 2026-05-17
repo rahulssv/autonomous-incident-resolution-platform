@@ -2,25 +2,25 @@ import asyncio
 import inspect
 from datetime import UTC, datetime
 
-from airp.api.deps import AdminPrincipal, ApproverPrincipal, ReadPrincipal, SREPrincipal
-from airp.core.middleware import (
+from backend.src.airp.api.deps import AdminPrincipal, ApproverPrincipal, ReadPrincipal, SREPrincipal
+from backend.src.airp.core.middleware import (
     CORRELATION_ID_HEADER,
     REQUEST_ID_HEADER,
     SECURITY_HEADERS,
     RequestBodyLimitMiddleware,
     SecurityHeadersMiddleware,
 )
-from airp.domain.enums import IncidentStatus
-from airp.main import create_app
-from airp.schemas.catalog import (
+from backend.src.airp.domain.enums import IncidentStatus
+from backend.src.airp.main import create_app
+from backend.src.airp.schemas.catalog import (
     DiscoveryRefreshRequest,
     RepositoryRead,
     RuntimeWorkloadRead,
     ServiceCreate,
     ServiceRead,
 )
-from airp.schemas.common import OperatorCommandRead, Page
-from airp.schemas.incidents import (
+from backend.src.airp.schemas.common import OperatorCommandRead, Page
+from backend.src.airp.schemas.incidents import (
     DocumentationReportCreate,
     DocumentationReportRead,
     DocumentationRepublishRequest,
@@ -41,7 +41,7 @@ from airp.schemas.incidents import (
     SlackMessageRead,
     ToolCallRead,
 )
-from airp.schemas.policy import EffectivePolicyRead
+from backend.src.airp.schemas.policy import EffectivePolicyRead
 
 
 def test_app_registers_expected_routes() -> None:

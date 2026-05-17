@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from time import perf_counter
 from typing import Any, Literal
@@ -86,15 +87,17 @@ class RCAEvidenceCollector:
             or correlation_result.get("docker_image")
         )
 
-        await self._collect_kubernetes(
-            evidence,
-            namespace=namespace,
-            pod_name=pod_name,
-            deployment=deployment,
-            container=container,
+        await asyncio.gather(
+            self._collect_kubernetes(
+                evidence,
+                namespace=namespace,
+                pod_name=pod_name,
+                deployment=deployment,
+                container=container,
+            ),
+            self._collect_github(evidence, repository_url=repository_url),
+            self._collect_dockerhub(evidence, image=image),
         )
-        await self._collect_github(evidence, repository_url=repository_url)
-        await self._collect_dockerhub(evidence, image=image)
         return evidence
 
     async def _collect_kubernetes(

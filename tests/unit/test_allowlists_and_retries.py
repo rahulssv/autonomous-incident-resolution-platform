@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import pytest
 
-from airp.agents.evidence import RCAEvidenceCollector
-from airp.api.routes.health import build_readiness_response, readiness
-from airp.core.allowlists import (
+from backend.src.airp.agents.evidence import RCAEvidenceCollector
+from backend.src.airp.api.routes.health import build_readiness_response, readiness
+from backend.src.airp.core.allowlists import (
     is_github_repository_allowed,
     is_namespace_allowed,
     normalize_github_repository,
 )
-from airp.core.config import Settings
-from airp.core.readiness import ProbeResult
-from airp.integrations.mcp_retry import read_with_retries
-from airp.workflows.activities import _tool_call_event_type
+from backend.src.airp.core.config import Settings
+from backend.src.airp.core.readiness import ProbeResult
+from backend.src.airp.integrations.mcp_retry import read_with_retries
+from backend.src.airp.workflows.activities import _tool_call_event_type
 
 
 def test_namespace_allowlist_supports_exact_and_wildcard_patterns() -> None:
@@ -224,7 +224,7 @@ async def test_active_readiness_marks_reachable_probe_ready() -> None:
 async def test_evidence_collector_records_partial_status() -> None:
     class PartialKubernetesClient:
         async def collect_evidence(self, **_: object) -> object:
-            from airp.integrations.kubernetes_mcp.client import (
+            from backend.src.airp.integrations.kubernetes_mcp.client import (
                 KubernetesEvidenceBundle,
                 KubernetesPodEvidence,
             )

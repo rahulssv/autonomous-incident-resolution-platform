@@ -2,10 +2,10 @@ import json
 
 import pytest
 
-from airp.domain.enums import IncidentSeverity
-from airp.messaging.alertmanager import normalize_alertmanager_payload
-from airp.messaging.dedupe import InMemoryDedupeStore
-from airp.workers.alert_consumer import AlertConsumerWorker
+from backend.src.airp.domain.enums import IncidentSeverity
+from backend.src.airp.messaging.alertmanager import normalize_alertmanager_payload
+from backend.src.airp.messaging.dedupe import InMemoryDedupeStore
+from backend.src.airp.workers.alert_consumer import AlertConsumerWorker
 
 
 def sample_alertmanager_payload() -> dict:

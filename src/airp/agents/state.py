@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from operator import add
+from typing import Annotated, Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -129,8 +130,8 @@ class AgentGraphState(TypedDict, total=False):
     embedding_texts: list[str]
     embedding_vectors: list[list[float]]
     evidence_ids: list[str]
-    tool_calls: list[dict[str, Any]]
-    model_calls: list[dict[str, Any]]
-    errors: list[str]
+    tool_calls: Annotated[list[dict[str, Any]], add]
+    model_calls: Annotated[list[dict[str, Any]], add]
+    errors: Annotated[list[str], add]
     next_action: str
-    agent_events: list[dict[str, Any]]
+    agent_events: Annotated[list[dict[str, Any]], add]

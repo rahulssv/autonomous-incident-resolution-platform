@@ -1,8 +1,8 @@
 import pytest
 
-from airp.core.config import Settings
-from airp.core.errors import AppError
-from airp.messaging.eventhub_kafka import build_consumer, kafka_config
+from backend.src.airp.core.config import Settings
+from backend.src.airp.core.errors import AppError
+from backend.src.airp.messaging.eventhub_kafka import build_consumer, kafka_config
 
 
 def test_kafka_config_uses_event_hubs_sasl_settings() -> None:

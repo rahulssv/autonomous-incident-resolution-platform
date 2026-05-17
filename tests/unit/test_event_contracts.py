@@ -1,9 +1,9 @@
 import json
 
-from airp.core.config import Settings
-from airp.messaging.contracts import RawAlertEvent
-from airp.messaging.eventhub_kafka import publish_json
-from airp.workers.alert_consumer import AlertConsumerWorker
+from backend.src.airp.core.config import Settings
+from backend.src.airp.messaging.contracts import RawAlertEvent
+from backend.src.airp.messaging.eventhub_kafka import publish_json
+from backend.src.airp.workers.alert_consumer import AlertConsumerWorker
 
 
 class FakeProducer:

@@ -74,13 +74,10 @@ class RCAAgent:
             },
         )
         agent_events = [
-            *state.get("agent_events", []),
             event.model_dump(mode="json"),
             hypothesis_event.model_dump(mode="json"),
         ]
-        model_calls = list(state.get("model_calls", []))
-        if model_call:
-            model_calls.append(model_call)
+        model_calls = [model_call] if model_call else []
         return {
             "rca_plan": plan.model_dump(mode="json"),
             "rca_evidence_bundle": plan.evidence_bundle.model_dump(mode="json"),
@@ -89,10 +86,7 @@ class RCAAgent:
                 hypothesis.model_dump(mode="json")
                 for hypothesis in hypothesis_result.hypotheses
             ],
-            "tool_calls": [
-                *state.get("tool_calls", []),
-                *plan.evidence_bundle.tool_calls,
-            ],
+            "tool_calls": list(plan.evidence_bundle.tool_calls),
             "model_calls": model_calls,
             "next_action": "embedding",
             "agent_events": agent_events,

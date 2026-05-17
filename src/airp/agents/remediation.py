@@ -47,18 +47,13 @@ class RemediationAgent:
             agent=self.name,
             payload=result.model_dump(mode="json"),
         )
-        model_calls = list(state.get("model_calls", []))
-        if model_call:
-            model_calls.append(model_call)
+        model_calls = [model_call] if model_call else []
 
         return {
             "remediation_result": result.model_dump(mode="json"),
             "model_calls": model_calls,
-            "next_action": "documentation",
-            "agent_events": [
-                *state.get("agent_events", []),
-                event.model_dump(mode="json"),
-            ],
+            "next_action": "embedding",
+            "agent_events": [event.model_dump(mode="json")],
         }
 
     def generate_plan(

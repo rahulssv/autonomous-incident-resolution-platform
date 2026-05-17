@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
-from airp.core.security import (
+from backend.src.airp.core.security import (
     AIRP_ADMIN_ROLE,
     AIRP_APPROVER_ROLE,
     AIRP_READ_ROLES,

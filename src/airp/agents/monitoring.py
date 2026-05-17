@@ -43,7 +43,7 @@ class MonitoringAgent:
         return {
             "monitoring_assessment": assessment.model_dump(mode="json"),
             "next_action": assessment.recommended_next_agent,
-            "agent_events": [*state.get("agent_events", []), event.model_dump(mode="json")],
+            "agent_events": [event.model_dump(mode="json")],
         }
 
     async def assess(self, state: AgentGraphState) -> MonitoringAssessment:
