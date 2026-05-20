@@ -5,8 +5,10 @@ description = "Backend API for the Autonomous Incident Resolution Platform"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aiohttp>=3.9",
     "alembic>=1.13",
     "asyncpg>=0.29",
+    "azure-eventhub>=5.13",
     "confluent-kafka>=2.5",
     "fastapi>=0.115,<0.116",
     "httpx>=0.27",

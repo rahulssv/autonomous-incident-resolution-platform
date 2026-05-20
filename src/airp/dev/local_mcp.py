@@ -648,6 +648,31 @@ def _github_fixture_tool(tool: str, arguments: dict[str, Any]) -> dict[str, Any]
                 "raw": {"html_url": f"{repository_url}/pull/10000", "fixture": True},
             }
             return {"result": {"pull_request": pull_request}}
+        case "github.read_file":
+            path = _required_argument(arguments, "path")
+            ref = str(arguments.get("ref") or "main")
+            fixture_lines = [
+                "# Local MCP fixture file content",
+                f"# repository={repository_url}",
+                f"# path={path}",
+                f"# ref={ref}",
+                "",
+                "config:",
+                "  load_strategy: lazy",
+                "  preload_embeddings: false",
+            ]
+            return {
+                "result": {
+                    "file": {
+                        "path": path,
+                        "ref": ref,
+                        "sha": "localmcp-fixture-sha",
+                        "size": sum(len(line) for line in fixture_lines),
+                        "content": "\n".join(fixture_lines) + "\n",
+                        "html_url": f"{repository_url}/blob/{ref}/{path}",
+                    }
+                }
+            }
         case _:
             raise HTTPException(status_code=404, detail=f"Unsupported GitHub MCP tool: {tool}")
 
@@ -776,6 +801,30 @@ async def _github_app_tool(tool: str, arguments: dict[str, Any]) -> dict[str, An
         case "github.create_pull_request":
             pull_request = await _github_create_pull_request(repo_path, token, arguments)
             return {"result": {"pull_request": pull_request}}
+        case "github.read_file":
+            path = _required_argument(arguments, "path")
+            ref = str(arguments.get("ref") or "main")
+            data = await _github_get_file(repo_path, token, path=path, ref=ref)
+            if data is None:
+                return {"result": {"file": None, "path": path, "ref": ref}}
+            content = ""
+            if data.get("encoding") == "base64" and isinstance(data.get("content"), str):
+                try:
+                    content = base64.b64decode(data["content"]).decode("utf-8")
+                except (binascii.Error, UnicodeDecodeError):
+                    content = ""
+            return {
+                "result": {
+                    "file": {
+                        "path": data.get("path") or path,
+                        "ref": ref,
+                        "sha": data.get("sha"),
+                        "size": data.get("size"),
+                        "content": content,
+                        "html_url": data.get("html_url"),
+                    }
+                }
+            }
         case _:
             raise HTTPException(status_code=404, detail=f"Unsupported GitHub MCP tool: {tool}")
 

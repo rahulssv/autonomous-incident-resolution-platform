@@ -1,3 +1,5 @@
+import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -12,12 +14,38 @@ from airp.schemas.incidents import IncidentEventCreate
 from airp.services.incident_service import IncidentService
 from airp.workflows.client import IncidentWorkflowStarter
 
+logger = logging.getLogger(__name__)
+
+# Generic K8s/Azure event placeholders that should NOT be treated as a real
+# microservice name. When an alert arrives with one of these in `service`, we
+# try to recover a real service name from the pod/deployment labels before
+# letting the alert through.
+_GENERIC_SERVICE_PLACEHOLDERS = frozenset(
+    {
+        "",
+        "azure-event",
+        "kube-event",
+        "kubernetes",
+        "k8s",
+        "service",
+        "container",
+        "unknown",
+    }
+)
+
+# Standard K8s pod-name pattern: <deployment>-<replicaset-hash>-<pod-hash>.
+# The two trailing hash segments are 5-10 chars of lowercase alphanumeric.
+_POD_NAME_HASH_SUFFIX = re.compile(r"^(?P<deployment>.+?)-[a-z0-9]{5,10}-[a-z0-9]{5,10}$")
+# Simpler form used by StatefulSets etc: <name>-<ordinal>.
+_POD_NAME_ORDINAL_SUFFIX = re.compile(r"^(?P<name>.+?)-\d+$")
+
 
 @dataclass
 class AlertIngestionResult:
     created_incident_ids: list[str] = field(default_factory=list)
     duplicate_keys: list[str] = field(default_factory=list)
     normalized_count: int = 0
+    remapped_count: int = 0
 
 
 class AlertIngestionService:
@@ -44,6 +72,17 @@ class AlertIngestionService:
         result = AlertIngestionResult(normalized_count=len(alerts))
 
         for alert in alerts:
+            remapped = self._remap_generic_service(alert)
+            if remapped is not alert:
+                result.remapped_count += 1
+                logger.info(
+                    "alert_service_remapped from=%s to=%s pod=%s deployment=%s",
+                    alert.service,
+                    remapped.service,
+                    alert.pod_name,
+                    alert.deployment,
+                )
+                alert = remapped
             created = await self._ingest_normalized_alert(alert, actor=actor)
             if created is None:
                 result.duplicate_keys.append(alert.dedupe_key)
@@ -51,6 +90,44 @@ class AlertIngestionService:
                 result.created_incident_ids.append(created)
 
         return result
+
+    @staticmethod
+    def _remap_generic_service(alert: NormalizedAlert) -> NormalizedAlert:
+        """If the alert's `service` is a generic placeholder, derive the real
+        microservice name from the pod/deployment labels and return a new
+        NormalizedAlert with the corrected service. Otherwise return the
+        original alert unchanged.
+
+        Order of precedence:
+            1. deployment label (most authoritative)
+            2. pod name minus the K8s hash suffix
+            3. namespace (last resort — usually too coarse, kept as identifier)
+        """
+        service = (alert.service or "").strip().lower()
+        if service not in _GENERIC_SERVICE_PLACEHOLDERS:
+            return alert
+
+        candidate: str | None = None
+
+        if alert.deployment and alert.deployment.strip().lower() not in _GENERIC_SERVICE_PLACEHOLDERS:
+            candidate = alert.deployment.strip()
+
+        if candidate is None and alert.pod_name:
+            pod = alert.pod_name.strip()
+            m = _POD_NAME_HASH_SUFFIX.match(pod)
+            if m:
+                candidate = m.group("deployment")
+            else:
+                m = _POD_NAME_ORDINAL_SUFFIX.match(pod)
+                if m:
+                    candidate = m.group("name")
+
+        if not candidate or candidate.strip().lower() in _GENERIC_SERVICE_PLACEHOLDERS:
+            # No good replacement found — leave the alert as-is so it still
+            # produces an incident, just without a real repo binding.
+            return alert
+
+        return alert.model_copy(update={"service": candidate})
 
     async def _ingest_normalized_alert(self, alert: NormalizedAlert, *, actor: str) -> str | None:
         existing = await self.incidents.get_incident_by_idempotency_key(alert.dedupe_key)
