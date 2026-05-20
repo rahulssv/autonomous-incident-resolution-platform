@@ -216,5 +216,32 @@ services:
       temporal:
         condition: service_started
 
+  dashboard:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    container_name: airp-dashboard
+    restart: unless-stopped
+    env_file:
+      - ./frontend/.env
+    environment:
+      PORT: "8000"
+      FRONTEND_DIST_DIR: /app/frontend/dist
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/auth/me', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   airp-postgres:
