@@ -96,7 +96,25 @@ async def _agent_graph_run_async(incident_id: str, workflow_id: str | None = Non
             )
 
             supervisor = build_default_agent_supervisor(settings)
-            state = await supervisor.run(
+
+            async def _persist_node_events(
+                node_name: str,
+                update: dict,
+                new_events: list[dict],
+            ) -> None:
+                for event in new_events:
+                    await service.add_event(
+                        incident_id,
+                        IncidentEventCreate(
+                            event_type=event["event_type"],
+                            producer=f"langgraph.{event['agent']}",
+                            payload=event["payload"],
+                        ),
+                    )
+                await session.commit()
+
+            state = await supervisor.run_streaming(
+                on_node_complete=_persist_node_events,
                 incident_id=incident.id,
                 workflow_id=workflow_id,
                 title=incident.title,
@@ -108,15 +126,6 @@ async def _agent_graph_run_async(incident_id: str, workflow_id: str | None = Non
                 workload_context=workload_context,
             )
 
-            for event in state.get("agent_events", []):
-                await service.add_event(
-                    incident_id,
-                    IncidentEventCreate(
-                        event_type=event["event_type"],
-                        producer=f"langgraph.{event['agent']}",
-                        payload=event["payload"],
-                    ),
-                )
             await _persist_rca_outputs(service, incident_id, state)
     finally:
         await engine.dispose()
@@ -860,6 +869,14 @@ def _remediation_pr_body(
     assignee_source: str | None,
 ) -> str:
     issue_reference = issue_url or "unavailable"
+    code_change_paths = [p for p in changed_files if not p.startswith(".airp/remediations/")]
+    is_docs_only = not code_change_paths
+    code_change_label = (
+        "**No** — this PR contains only an AIRP remediation plan document. "
+        "Apply the proposed change manually after reviewing the plan, then close or update this PR."
+        if is_docs_only
+        else "**Yes** — review the listed files below before merge."
+    )
     lines = [
         f"<!-- {marker} -->",
         "# AIRP Remediation PR",
@@ -867,6 +884,7 @@ def _remediation_pr_body(
         f"Related RCA issue: {issue_reference}",
         f"Incident ID: `{incident.id}`",
         f"Severity: `{incident.severity}`",
+        f"Code changes required: {code_change_label}",
         "",
         "## Remediation",
         _truncate(remediation_plan.plan_summary, 2000),
@@ -880,6 +898,12 @@ def _remediation_pr_body(
         "## Files Changed",
     ]
     lines.extend(f"- `{path}`" for path in changed_files)
+    if is_docs_only:
+        lines.extend([
+            "",
+            "_AIRP did not modify any source files in this PR. The `.airp/remediations/` "
+            "markdown is the proposed plan; an engineer is expected to implement the actual fix._",
+        ])
     lines.extend(
         [
             "",
@@ -920,9 +944,13 @@ def _remediation_pr_file_content(
     lines = [
         "# AIRP Remediation Plan",
         "",
+        "> **Status:** Documentation-only PR. AIRP did not modify any source files. "
+        "An engineer must implement the actual code change after reviewing this plan.",
+        "",
         f"- Incident ID: `{incident.id}`",
         f"- Severity: `{incident.severity}`",
         f"- Environment: `{incident.environment}`",
+        f"- Code changes required: **No** (review and implement manually)",
         f"- RCA issue: {issue_url or 'unavailable'}",
         f"- Assigned owner candidate: `{assignee}`"
         if assignee

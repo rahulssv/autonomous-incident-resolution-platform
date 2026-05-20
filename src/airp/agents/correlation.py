@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from airp.agents.state import AgentEvent, AgentGraphState, CorrelationResult
+from airp.core.config import Settings, get_settings
 
 
 class CorrelationAgent:
     name = "correlation"
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
 
     async def __call__(self, state: AgentGraphState) -> AgentGraphState:
         result = self.correlate(state)
@@ -26,6 +30,8 @@ class CorrelationAgent:
 
         service_name = service_context.get("name") or monitoring.get("affected_service")
         repository_url = service_context.get("repository_url")
+        if not repository_url and service_name:
+            repository_url = self._infer_repository_url(service_name)
         docker_image = service_context.get("docker_image") or workload_context.get("image")
         namespace = service_context.get("namespace") or workload_context.get("namespace")
         pod_name = workload_context.get("pod_name")
@@ -61,3 +67,9 @@ class CorrelationAgent:
             recommended_next_agent="rca",
             confidence=confidence,
         )
+
+    def _infer_repository_url(self, service_name: str) -> str | None:
+        org = (getattr(self.settings, "client_github_org", "") or "").strip()
+        if not org:
+            return None
+        return f"https://github.com/{org}/{service_name}"

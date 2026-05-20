@@ -6,6 +6,10 @@ from typing import Annotated, Any, Literal, TypedDict
 from pydantic import BaseModel, Field
 
 
+def _last_action(left: str | None, right: str | None) -> str | None:
+    return right if right is not None else left
+
+
 class AgentEvent(BaseModel):
     event_type: str
     agent: str
@@ -133,5 +137,5 @@ class AgentGraphState(TypedDict, total=False):
     tool_calls: Annotated[list[dict[str, Any]], add]
     model_calls: Annotated[list[dict[str, Any]], add]
     errors: Annotated[list[str], add]
-    next_action: str
+    next_action: Annotated[str, _last_action]
     agent_events: Annotated[list[dict[str, Any]], add]
