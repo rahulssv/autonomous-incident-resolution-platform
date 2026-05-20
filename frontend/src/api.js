@@ -152,21 +152,31 @@ export function authSessionToDashboard(authSession, currentDashboard = mockDashb
   }
 
   const orgs = authSession.user.organizations || [];
-  const tenants = orgs.map((org) => ({
-        id: org.id || org.githubOrg,
-        name: org.name || org.githubOrg,
-        plan: "GitHub",
-        repositories: org.repositories || 0,
-        githubOrg: org.githubOrg || org.id,
-        url: org.url,
-        avatarUrl: org.avatarUrl,
-        membershipRole: org.membershipRole,
-        membershipState: org.membershipState,
-        source: org.source,
-        installationId: org.installationId,
-        repositorySelection: org.repositorySelection,
-        appSlug: org.appSlug
-  }));
+  const tenants = orgs.map((org) => {
+    const isAdmin = (org.membershipRole || "").toLowerCase() === "admin";
+    return {
+      id: org.id || org.githubOrg,
+      name: org.name || org.githubOrg,
+      plan: "GitHub",
+      repositories: org.repositories || 0,
+      githubOrg: org.githubOrg || org.id,
+      url: org.url,
+      avatarUrl: org.avatarUrl,
+      membershipRole: org.membershipRole,
+      membershipState: org.membershipState,
+      isAdmin,
+      source: org.source,
+      installationId: org.installationId,
+      repositorySelection: org.repositorySelection,
+      appSlug: org.appSlug
+    };
+  });
+
+  // Roles are derived from real GitHub org membership: a user only sees "Admin"
+  // in the role selector when they actually have admin membership on at least
+  // one of their tenants. Otherwise they are restricted to the User role.
+  const hasAnyAdminTenant = tenants.some((tenant) => tenant.isAdmin);
+  const roles = hasAnyAdminTenant ? ["Admin", "User"] : ["User"];
 
   const firstTenant = tenants[0];
   return {
@@ -178,7 +188,7 @@ export function authSessionToDashboard(authSession, currentDashboard = mockDashb
       org: firstTenant?.name || "",
       tenant: firstTenant?.id || "",
       avatarUrl: authSession.user.avatarUrl,
-      roles: ["Admin", "User"],
+      roles,
       teams: []
     },
     tenants,

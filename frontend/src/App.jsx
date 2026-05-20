@@ -283,7 +283,8 @@ function App() {
   const [authReady, setAuthReady] = useState(false);
   const [oauthConfigured, setOauthConfigured] = useState(true);
   const [authError, setAuthError] = useState("");
-  const [role, setRole] = useState("Admin");
+  const [role, setRole] = useState("User");
+  const [roleAccessError, setRoleAccessError] = useState("");
   const [dashboardData, setDashboardData] = useState(mockDashboardData);
   const [activityData, setActivityData] = useState(null);
   const [activityError, setActivityError] = useState("");
@@ -298,6 +299,18 @@ function App() {
   const incidents = dashboardData.incidents;
   const auditEvents = dashboardData.auditEvents;
   const tenant = tenants.find((item) => item.id === tenantId) || tenants[0] || null;
+  // RBAC: a user is only an admin if their real GitHub org membership role for
+  // the *currently selected* tenant is "admin". This is derived from
+  // membershipRole returned by /user/memberships/orgs in the auth payload.
+  const isAdminOfCurrentTenant = Boolean(tenant?.isAdmin);
+
+  useEffect(() => {
+    // If the selected tenant changes and the user isn't admin there,
+    // force the role back to "User" so they cannot see admin views.
+    if (!isAdminOfCurrentTenant && role === "Admin") {
+      setRole("User");
+    }
+  }, [isAdminOfCurrentTenant, role]);
 
   useEffect(() => {
     let cancelled = false;
@@ -578,26 +591,48 @@ function App() {
           <div className="topbar-actions">
             <div className="role-control">
               <div className="role-switch" aria-label="Role selector">
-                {roleTabs.map((item) => (
-                  <button
-                    key={item}
-                    className={role === item ? "active" : ""}
-                    onClick={() => {
-                      setRole(item);
-                      const next =
-                        item === "Admin"
-                          ? tenantIncidents[0]
-                          : tenantIncidents.find(
-                              (incident) =>
-                                incidentVisibleToUser(incident, sessionUser.handle)
-                            );
-                      if (next) setSelectedIncidentId(next.id);
-                    }}
-                  >
-                    {item}
-                  </button>
-                ))}
+                {roleTabs.map((item) => {
+                  const isAdminButton = item === "Admin";
+                  const lockedOut = isAdminButton && !isAdminOfCurrentTenant;
+                  return (
+                    <button
+                      key={item}
+                      className={`${role === item ? "active" : ""}${lockedOut ? " role-locked" : ""}`}
+                      title={
+                        lockedOut
+                          ? "Not authorized. Admin requires admin membership on this GitHub org."
+                          : undefined
+                      }
+                      aria-disabled={lockedOut ? "true" : undefined}
+                      onClick={() => {
+                        if (lockedOut) {
+                          setRoleAccessError(
+                            `Not authorized: you do not have admin role on "${tenant?.name || tenant?.githubOrg || "this org"}". Admin view requires GitHub org admin membership.`
+                          );
+                          window.setTimeout(() => setRoleAccessError(""), 5000);
+                          return;
+                        }
+                        setRoleAccessError("");
+                        setRole(item);
+                        const next =
+                          isAdminButton
+                            ? tenantIncidents[0]
+                            : tenantIncidents.find(
+                                (incident) =>
+                                  incidentVisibleToUser(incident, sessionUser.handle)
+                              );
+                        if (next) setSelectedIncidentId(next.id);
+                      }}
+                    >
+                      {lockedOut && <span className="role-lock-icon" aria-hidden="true">🔒</span>}
+                      {item}
+                    </button>
+                  );
+                })}
               </div>
+              {roleAccessError && (
+                <p className="role-access-error" role="alert">{roleAccessError}</p>
+              )}
             </div>
             <div className="account-cluster">
               <div className="user-chip">

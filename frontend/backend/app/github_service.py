@@ -115,6 +115,10 @@ async def get_viewer(client: GitHubClient, org_limit: int = 50) -> dict[str, Any
     rest_orgs = await get_viewer_organizations_rest(client)
     installation_orgs = await get_viewer_installation_organizations_rest(client)
     organizations = _merge_organizations(installation_orgs, rest_orgs, graph_orgs)
+    # When the bulk /user/memberships/orgs endpoint returns nothing (common with
+    # GitHub App user-access tokens), fall back to a per-org self-membership
+    # lookup so we can still set membershipRole correctly.
+    organizations = await _backfill_membership_roles(client, organizations)
     return {
         "login": viewer["login"],
         "name": viewer.get("name") or viewer["login"],
@@ -122,6 +126,58 @@ async def get_viewer(client: GitHubClient, org_limit: int = 50) -> dict[str, Any
         "url": viewer["url"],
         "organizations": organizations,
     }
+
+
+_ADMIN_LEVEL_INSTALLATION_PERMISSIONS = (
+    "organization_administration",
+    "administration",
+)
+
+
+async def _backfill_membership_roles(
+    client: GitHubClient,
+    organizations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    for org in organizations:
+        if org.get("membershipRole"):
+            continue
+        login = org.get("githubOrg")
+        if not login:
+            continue
+
+        # 1) Try the per-org self-membership endpoint. Works for classic OAuth
+        #    tokens with read:org scope.
+        try:
+            membership = await client.rest("GET", f"/user/memberships/orgs/{login}")
+        except Exception:
+            membership = None
+        role = (membership or {}).get("role")
+        state = (membership or {}).get("state")
+        if role:
+            org["membershipRole"] = role
+        if state and not org.get("membershipState"):
+            org["membershipState"] = state
+        if org.get("membershipRole"):
+            continue
+
+        # 2) Fallback for GitHub App user-access tokens (which can't hit
+        #    /user/orgs or /user/memberships/orgs). If the user has access to
+        #    an installation that grants org-administration or administration
+        #    write permissions, they must be an org admin — only org admins
+        #    can install or approve a GitHub App with those permissions, and
+        #    /user/installations only lists installations the user has
+        #    explicit permission to access.
+        permissions = org.get("permissions") or {}
+        if any(
+            permissions.get(perm) == "write"
+            for perm in _ADMIN_LEVEL_INSTALLATION_PERMISSIONS
+        ):
+            org["membershipRole"] = "admin"
+            org["membershipRoleSource"] = "installation-admin-permissions"
+            if not org.get("membershipState"):
+                org["membershipState"] = "active"
+
+    return organizations
 
 
 async def get_viewer_installation_organizations_rest(
