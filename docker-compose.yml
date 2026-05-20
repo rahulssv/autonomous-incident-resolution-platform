@@ -229,8 +229,12 @@ services:
     environment:
       PORT: "8000"
       FRONTEND_DIST_DIR: /app/frontend/dist
+      AIRP_DATABASE_URL: postgresql+asyncpg://airp:airp@postgres:5432/airp
     ports:
       - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test:
         [
