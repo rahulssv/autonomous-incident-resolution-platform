@@ -59,6 +59,16 @@ def build_default_agent_supervisor(settings: Settings | None = None) -> LangGrap
             retry_max_backoff_seconds=settings.mcp_read_retry_max_backoff_seconds,
         )
 
+    # Build a GitHub MCP client for the remediation agent so it can read the
+    # suspect file and propose a real code-fix patch when appropriate.
+    remediation_github_client = None
+    if settings.github_mcp_transport != "disabled" and settings.github_mcp_url:
+        remediation_github_client = GitHubMCPClient(
+            transport=settings.github_mcp_transport,
+            endpoint_url=str(settings.github_mcp_url),
+            timeout_seconds=settings.github_mcp_read_timeout_seconds,
+        )
+
     return LangGraphSupervisor(
         monitoring_agent=MonitoringAgent(settings=settings, llm_client=genai_client),
         correlation_agent=CorrelationAgent(),
@@ -67,7 +77,11 @@ def build_default_agent_supervisor(settings: Settings | None = None) -> LangGrap
             evidence_collector=evidence_collector,
             llm_client=genai_client,
         ),
-        remediation_agent=RemediationAgent(settings=settings, llm_client=genai_client),
+        remediation_agent=RemediationAgent(
+            settings=settings,
+            llm_client=genai_client,
+            github_client=remediation_github_client,
+        ),
         documentation_agent=DocumentationAgent(settings=settings, llm_client=genai_client),
         embedding_agent=EmbeddingAgent(settings=settings, embedder=embedding_client),
     )

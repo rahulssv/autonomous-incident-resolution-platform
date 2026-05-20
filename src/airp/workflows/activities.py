@@ -390,6 +390,8 @@ async def incident_create_remediation_pr(incident_id: str) -> dict[str, Any]:
                 candidate_files,
             )
             file_path = f".airp/remediations/{incident_id}.md"
+            # Determine code-fix paths first so the .md status line is accurate.
+            code_changes = _extract_code_changes(remediation_plans[0])
             file_content = _remediation_pr_file_content(
                 incident,
                 remediation_plans[0],
@@ -399,7 +401,26 @@ async def incident_create_remediation_pr(incident_id: str) -> dict[str, Any]:
                 issue_url=incident.github_issue_url,
                 assignee=assignee,
                 assignee_source=assignee_source,
+                code_change_paths=[c["path"] for c in code_changes],
             )
+            files_to_commit = [
+                {
+                    "path": file_path,
+                    "content": file_content,
+                    "message": f"AIRP remediation plan for incident {incident_id}",
+                }
+            ]
+            # If the remediation agent proposed concrete code changes, commit them
+            # alongside the .md so the PR is a real code-fix PR rather than docs-only.
+            for change in code_changes:
+                files_to_commit.append(
+                    {
+                        "path": change["path"],
+                        "content": change["content"],
+                        "message": change.get("message")
+                        or f"AIRP automated fix for {change['path']}",
+                    }
+                )
             payload = {
                 "base": base_branch,
                 "branch": branch,
@@ -409,17 +430,11 @@ async def incident_create_remediation_pr(incident_id: str) -> dict[str, Any]:
                     remediation_plans[0],
                     issue_url=incident.github_issue_url,
                     marker=marker,
-                    changed_files=[file_path],
+                    changed_files=[f["path"] for f in files_to_commit],
                     assignee=assignee,
                     assignee_source=assignee_source,
                 ),
-                "files": [
-                    {
-                        "path": file_path,
-                        "content": file_content,
-                        "message": f"AIRP remediation plan for incident {incident_id}",
-                    }
-                ],
+                "files": files_to_commit,
                 "assignees": [assignee] if assignee else [],
                 "idempotency_marker": marker,
             }
@@ -851,6 +866,46 @@ def _github_pull_request_number(pull_request: dict[str, Any]) -> str | None:
     return str(value) if value is not None else None
 
 
+def _extract_code_changes(remediation_plan: Any) -> list[dict[str, Any]]:
+    """Pull validated code_changes out of the remediation plan ORM row.
+
+    The agent's RemediationAgentOutput (including code_changes) lands in the
+    ORM's `extra` JSON column ("metadata" in the database). We look there.
+    """
+    if remediation_plan is None:
+        return []
+    raw: Any = None
+    # First, try direct attribute (in case the schema changes in future)
+    raw = getattr(remediation_plan, "code_changes", None)
+    if raw is None:
+        for attr in ("extra", "metadata", "plan_payload", "result_payload"):
+            blob = getattr(remediation_plan, attr, None)
+            if isinstance(blob, dict) and isinstance(blob.get("code_changes"), list):
+                raw = blob["code_changes"]
+                break
+    if not isinstance(raw, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        content = entry.get("content")
+        if not path or not isinstance(content, str) or not content.strip():
+            continue
+        if path.startswith(".airp/remediations/"):
+            # Don't let the LLM hijack the slot reserved for the AIRP doc file.
+            continue
+        result.append(
+            {
+                "path": path,
+                "content": content,
+                "message": entry.get("message"),
+            }
+        )
+    return result
+
+
 def _remediation_pr_title(incident: Incident, marker: str) -> str:
     service_name = _incident_service_name(incident)
     suffix = f" [{marker}]"
@@ -928,6 +983,7 @@ def _remediation_pr_file_content(
     issue_url: str | None,
     assignee: str | None,
     assignee_source: str | None,
+    code_change_paths: list[str] | None = None,
 ) -> str:
     root_cause = (
         hypothesis.hypothesis
@@ -941,16 +997,31 @@ def _remediation_pr_file_content(
     if not evidence_lines:
         evidence_lines.append("- No persisted evidence was available.")
 
+    code_change_paths = code_change_paths or []
+    if code_change_paths:
+        status_line = (
+            "> **Status:** Code-fix PR. AIRP modified the suspect source file(s) listed below "
+            "based on the RCA hypothesis. Review the diff carefully before merge."
+        )
+        code_changes_summary = "**Yes** — see the suspect file(s) modified in this PR:\n" + "\n".join(
+            f"  - `{p}`" for p in code_change_paths
+        )
+    else:
+        status_line = (
+            "> **Status:** Documentation-only PR. AIRP did not modify any source files. "
+            "An engineer must implement the actual code change after reviewing this plan."
+        )
+        code_changes_summary = "**No** (review and implement manually)"
+
     lines = [
         "# AIRP Remediation Plan",
         "",
-        "> **Status:** Documentation-only PR. AIRP did not modify any source files. "
-        "An engineer must implement the actual code change after reviewing this plan.",
+        status_line,
         "",
         f"- Incident ID: `{incident.id}`",
         f"- Severity: `{incident.severity}`",
         f"- Environment: `{incident.environment}`",
-        f"- Code changes required: **No** (review and implement manually)",
+        f"- Code changes required: {code_changes_summary}",
         f"- RCA issue: {issue_url or 'unavailable'}",
         f"- Assigned owner candidate: `{assignee}`"
         if assignee
@@ -1267,6 +1338,10 @@ async def _persist_remediation_output(
                     "pr_creation_recommended", False
                 ),
                 "confidence": remediation.get("confidence"),
+                # Carry the agent's proposed code changes through to persistence so
+                # incident_create_remediation_pr -> _extract_code_changes can find
+                # them and commit them alongside the .airp/remediations/<id>.md.
+                "code_changes": remediation.get("code_changes", []),
             },
         ),
     )

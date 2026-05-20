@@ -105,6 +105,63 @@ def remediation_plan_messages(
     ]
 
 
+def code_change_messages(
+    *,
+    incident: dict[str, Any],
+    rca_hypotheses: list[dict[str, Any]],
+    remediation_plan: dict[str, Any],
+    suspect_file: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Prompt the LLM to propose a patched version of the suspect file."""
+
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are the AIRP Remediation Code Patcher. Given an incident, "
+                "the RCA hypotheses, the remediation plan, and the full current "
+                "content of the suspect source file, decide whether a small, "
+                "low-risk code or configuration change to that one file would "
+                "address the root cause.\n\n"
+                "Return ONLY a JSON object with this shape:\n"
+                "{\n"
+                '  "code_changes": [\n'
+                "    {\n"
+                '      "path": "<exact same path as suspect_file.path>",\n'
+                '      "content": "<full new file contents, not a diff>",\n'
+                '      "message": "<one-line commit message>",\n'
+                '      "rationale": "<one paragraph explaining what changed and why>"\n'
+                "    }\n"
+                "  ],\n"
+                '  "rationale": "<overall reasoning, or empty if no change>"\n'
+                "}\n\n"
+                "Rules:\n"
+                "- Output the FULL new file content, not a diff or patch fragment.\n"
+                "- Touch ONLY the suspect file. Do not invent additional files.\n"
+                "- Preserve the existing language/format (YAML stays YAML, Python stays Python, etc.).\n"
+                "- Make the smallest possible change that addresses the RCA hypothesis.\n"
+                "- If you are not confident a code-only fix would help (e.g. the root cause is "
+                "infrastructure, networking, or unrelated to this file), return an EMPTY "
+                "code_changes array. Do not invent a fix when unsure.\n"
+                "- Do not include explanatory text outside the JSON object."
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "incident": sanitize_untrusted_payload(incident),
+                    "rca_hypotheses": sanitize_untrusted_payload(rca_hypotheses),
+                    "remediation_plan": sanitize_untrusted_payload(remediation_plan),
+                    "suspect_file": sanitize_untrusted_payload(suspect_file),
+                },
+                separators=(",", ":"),
+                default=str,
+            ),
+        },
+    ]
+
+
 def documentation_report_messages(
     *,
     incident: dict[str, Any],

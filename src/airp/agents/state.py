@@ -83,6 +83,13 @@ class RCAHypothesisSet(BaseModel):
     escalation_reason: str | None = None
 
 
+class CodeChange(BaseModel):
+    path: str
+    content: str
+    message: str | None = None
+    rationale: str | None = None
+
+
 class RemediationAgentOutput(BaseModel):
     plan_summary: str
     risk_level: Literal["low", "medium", "high"] = "medium"
@@ -96,6 +103,7 @@ class RemediationAgentOutput(BaseModel):
     external_writes_allowed: bool = False
     pr_creation_recommended: bool = False
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    code_changes: list[CodeChange] = Field(default_factory=list)
 
 
 class DocumentationReportDraft(BaseModel):

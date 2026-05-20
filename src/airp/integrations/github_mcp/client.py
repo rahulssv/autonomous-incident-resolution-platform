@@ -154,6 +154,39 @@ class GitHubMCPClient:
         self._record_response_messages(payload)
         return item_list(payload, "commits", "items")
 
+    async def read_file(
+        self,
+        repository_url: str,
+        *,
+        path: str,
+        ref: str = "main",
+    ) -> dict[str, Any] | None:
+        """Fetch a single file's full content from the configured GitHub MCP."""
+        if self.fixture is not None:
+            if not self._matches_repository(repository_url):
+                return None
+            # Fixture mode returns a small canned file so tests can exercise the
+            # code-fix PR path without hitting GitHub.
+            return {
+                "path": path,
+                "ref": ref,
+                "sha": "fixture-sha",
+                "size": 0,
+                "content": (
+                    "# Local fixture file\n"
+                    f"# repository={repository_url}\n"
+                    f"# path={path}\n"
+                    f"# ref={ref}\n"
+                ),
+                "html_url": f"{repository_url}/blob/{ref}/{path}",
+            }
+        payload = await self._call_tool(
+            "github.read_file",
+            {"repository_url": repository_url, "path": path, "ref": ref},
+        )
+        self._record_response_messages(payload)
+        return optional_dict(payload, "file", "item")
+
     async def lookup_commit(self, repository_url: str, sha: str) -> dict[str, Any] | None:
         if self.fixture is not None:
             if not self._matches_repository(repository_url):
