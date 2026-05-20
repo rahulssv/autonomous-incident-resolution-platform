@@ -264,12 +264,12 @@ async def graph_demo_resolution(
 
 @app.get("/api/graph/incidents")
 async def graph_incidents() -> dict:
-    return list_resolution_incidents()
+    return await list_resolution_incidents()
 
 
 @app.get("/api/graph/incidents/{incident_id}")
 async def graph_incident_detail(incident_id: str) -> JSONResponse:
-    detail = get_resolution_incident(incident_id)
+    detail = await get_resolution_incident(incident_id)
     if not detail:
         return JSONResponse({"detail": "Graph incident not found"}, status_code=404)
     return JSONResponse(detail)

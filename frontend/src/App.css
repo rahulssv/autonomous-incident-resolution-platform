@@ -1842,6 +1842,21 @@ li {
   border-color: var(--blue);
   background: var(--blue-soft);
   color: var(--blue);
+  animation: airp-stage-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes airp-stage-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(33, 102, 230, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(33, 102, 230, 0);
+  }
+}
+
+.resolution-stage-dot,
+.resolution-stage-item::before {
+  transition: background 0.4s ease, border-color 0.4s ease, color 0.4s ease;
 }
 
 .resolution-stage-item.complete {

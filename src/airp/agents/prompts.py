@@ -5,7 +5,7 @@ from typing import Any
 
 from airp.agents.safety import sanitize_untrusted_payload
 
-RCA_HYPOTHESIS_PROMPT_VERSION = "rca-hypothesis-v1"
+RCA_HYPOTHESIS_PROMPT_VERSION = "rca-hypothesis-v2"
 REMEDIATION_PLAN_PROMPT_VERSION = "remediation-plan-v1"
 DOCUMENTATION_REPORT_PROMPT_VERSION = "documentation-report-v1"
 
@@ -21,11 +21,34 @@ def rca_hypothesis_messages(
         {
             "role": "system",
             "content": (
-                "You are the AIRP RCA Agent. Produce only JSON matching the requested "
-                "schema. Ground every hypothesis in the supplied evidence refs. Use "
-                "supporting_evidence_refs values from: kubernetes, github, dockerhub, "
-                "monitoring, correlation, service_catalog, runtime_workload. Do not "
-                "claim a root cause when evidence is missing; escalate instead."
+                "You are the AIRP RCA Agent. Return ONLY a single JSON object that "
+                "strictly matches the schema below. No prose, no markdown fences, no "
+                "extra fields, no comments.\n\n"
+                "REQUIRED SCHEMA (RCAHypothesisSet):\n"
+                "{\n"
+                '  "summary": "<one-paragraph string overview of the RCA conclusions>",\n'
+                '  "hypotheses": [\n'
+                "    {\n"
+                '      "rank": 1,                          // INTEGER >= 1, NOT a string id like "H1"\n'
+                '      "hypothesis": "<string explaining the suspected root cause>",\n'
+                '      "confidence": 0.85,                  // FLOAT 0.0-1.0, NOT "high"/"low"\n'
+                '      "supporting_evidence_refs": ["github", "kubernetes"],\n'
+                '      "supporting_evidence_ids": [],\n'
+                '      "contradictions": [],\n'
+                '      "next_actions": ["roll_back_deployment"]\n'
+                "    }\n"
+                "  ],\n"
+                '  "escalation_required": false,           // BOOLEAN\n'
+                '  "escalation_reason": null                // STRING or null\n'
+                "}\n\n"
+                "Field rules:\n"
+                "- rank is an INTEGER starting at 1; do not use string identifiers like H1/H2.\n"
+                "- confidence is a FLOAT between 0.0 and 1.0 (e.g. 0.9 for high, 0.3 for low).\n"
+                "- supporting_evidence_refs values must come from: kubernetes, github, "
+                "dockerhub, monitoring, correlation, service_catalog, runtime_workload.\n"
+                "- Every hypothesis MUST include supporting_evidence_refs grounded in the "
+                "supplied evidence; otherwise set escalation_required=true.\n"
+                "- Do not claim a root cause when evidence is missing; escalate instead."
             ),
         },
         {

@@ -685,6 +685,8 @@ function ResolutionConsoleView() {
   const streamRef = useRef(null);
   const stageItemsRef = useRef(resolutionStages);
   const selectedIdRef = useRef("");
+  const autoRunSeenRef = useRef(new Set());
+  const isRunningRef = useRef(false);
   const [stageItems, setStageItems] = useState(resolutionStages);
   const [queue, setQueue] = useState([]);
   const [selectedId, setSelectedId] = useState("");
@@ -718,6 +720,10 @@ function ResolutionConsoleView() {
   }, [selectedId]);
 
   useEffect(() => {
+    isRunningRef.current = runStatus === "running";
+  }, [runStatus]);
+
+  useEffect(() => {
     let cancelled = false;
     fetchResolutionStages()
       .then((payload) => {
@@ -743,7 +749,7 @@ function ResolutionConsoleView() {
     }
 
     poll();
-    const interval = window.setInterval(poll, 10000);
+    const interval = window.setInterval(poll, 3000);
 
     return () => {
       cancelled = true;
@@ -784,6 +790,24 @@ function ResolutionConsoleView() {
         setPollStatus(`Polling active - ${items.length} unresolved`);
         if (!selectedIdRef.current || !items.some((item) => item.id === selectedIdRef.current)) {
           setSelectedId(items[0]?.id || "");
+        }
+
+        // Auto-run: find newest real (UUID) unresolved incident we haven't streamed yet.
+        // Real incidents have a "-" in their id (uuid); demo ones look like "LG-1001".
+        const candidate = items.find(
+          (item) =>
+            typeof item.id === "string"
+            && item.id.length > 20
+            && item.id.includes("-")
+            && item.state !== "resolved"
+            && !autoRunSeenRef.current.has(item.id)
+        );
+        if (candidate && !isRunningRef.current) {
+          autoRunSeenRef.current.add(candidate.id);
+          setSelectedId(candidate.id);
+          // Small delay so the detail fetch can populate state first; the stream
+          // doesn't depend on it but it makes the UI render the selected row.
+          window.setTimeout(() => startSelectedResolution(candidate.id), 50);
         }
       })
       .catch((error) => {
@@ -842,14 +866,22 @@ function ResolutionConsoleView() {
     setDocumentationDraft(documentationRows(payload.documentation));
   }
 
-  function startSelectedResolution() {
-    if (!selectedId || isRunning) return;
+  function startSelectedResolution(explicitId) {
+    const targetId = explicitId || selectedId;
+    if (!targetId || isRunningRef.current) return;
     closeResolutionStream(streamRef);
+
+    // Reset stage progression so live transitions are visible.
+    setCompletedStages([]);
+    setActiveStageId(stageItemsRef.current[0]?.id || "monitoring");
+    setActiveStageTitle(stageItemsRef.current[0]?.label || "Monitoring");
+    setStageSummary("Workflow started — waiting for first agent.");
 
     setRunState("Resolving");
     setRunStatus("running");
+    isRunningRef.current = true;
 
-    const stream = new EventSource(buildIncidentResolutionStreamUrl(selectedId), {
+    const stream = new EventSource(buildIncidentResolutionStreamUrl(targetId), {
       withCredentials: true
     });
     streamRef.current = stream;
@@ -884,19 +916,28 @@ function ResolutionConsoleView() {
     stream.addEventListener("stage_completed", (event) => {
       const data = parseStreamEvent(event);
       const stage = stageItemsRef.current.find((item) => item.id === data.stage);
+      // Add ONLY this stage to completedStages — animates one-at-a-time.
+      // Don't blat with data.detail.completedStages (it may already contain all stages
+      // for live polling against an already-progressing workflow).
       setCompletedStages((current) => [...new Set([...current, data.stage])]);
       setActiveStageId(data.nextStage || "");
       setActiveStageTitle(stage?.label || data.stage || "Stage");
-      setStageSummary(data.summary || "Stage completed.");
+      const dur = data.duration_ms != null ? ` (${(data.duration_ms / 1000).toFixed(2)}s)` : "";
+      setStageSummary(`${stage?.label || data.stage} completed${dur}.`);
       updateResolutionMetrics(data.snapshot, setMetrics);
       setIncident((current) =>
         current ? { ...current, status: data.nextStage ? "Resolving" : "Resolved" } : current
       );
-      updateResolutionArtifacts(data, setRcaHypothesis, setEvidenceRefs, setDocumentationDraft);
+      // Pull RCA hypothesis / evidence / documentation from data.detail without
+      // overriding completedStages / activeStageId.
       if (data.detail) {
-        applyResolutionDetail(data.detail);
-        setRunStatus("running");
+        const d = data.detail;
+        if (d.rca?.hypothesis) setRcaHypothesis(d.rca.hypothesis);
+        if (d.rca?.evidence) setEvidenceRefs(d.rca.evidence);
+        if (d.documentation) setDocumentationDraft(documentationRows(d.documentation));
       }
+      updateResolutionArtifacts(data, setRcaHypothesis, setEvidenceRefs, setDocumentationDraft);
+      setRunStatus("running");
     });
 
     stream.addEventListener("run_completed", (event) => {
@@ -904,6 +945,7 @@ function ResolutionConsoleView() {
       updateResolutionMetrics(data.snapshot, setMetrics);
       setRunState(data.issueCreated ? "Issue Created" : "Resolved");
       setRunStatus("done");
+      isRunningRef.current = false;
       setActiveStageId("");
       setIncident((current) =>
         current
@@ -920,6 +962,7 @@ function ResolutionConsoleView() {
       const data = parseStreamEvent(event);
       setRunState("Error");
       setRunStatus("error");
+      isRunningRef.current = false;
       closeResolutionStream(streamRef);
     });
 
@@ -1033,9 +1076,6 @@ function ResolutionConsoleView() {
                     <span>{incident.severity}</span>
                     <span>{incident.status}</span>
                   </div>
-                  <button type="button" onClick={startSelectedResolution} disabled={isRunning}>
-                    {isRunning ? "Resolving..." : "Run Selected"}
-                  </button>
                 </div>
 
                 {incident.issueCreated && (
