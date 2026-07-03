@@ -7,7 +7,7 @@ services:
       KAFKA_NODE_ID: 0
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://172.22.0.1:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
@@ -132,6 +132,15 @@ services:
       timeout: 5s
       retries: 5
 
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      AIRP_DATABASE_URL: postgresql+asyncpg://airp:airp@postgres:5432/airp
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build: .
     environment: &airp-app-env
@@ -207,6 +216,8 @@ services:
     ports:
       - "8080:8080"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -223,6 +234,8 @@ services:
     environment:
       <<: *airp-app-env
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -242,6 +255,8 @@ services:
       <<: *airp-app-env
       AIRP_KAFKA_AUTO_OFFSET_RESET: ${AIRP_KAFKA_ALERT_AUTO_OFFSET_RESET:-latest}
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       kafka:
         condition: service_healthy
       postgres:

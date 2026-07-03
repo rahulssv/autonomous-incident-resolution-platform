@@ -13,17 +13,25 @@ ConsumerCallback = Callable[[Consumer, list[TopicPartition]], None]
 
 def kafka_config(settings: Settings | None = None) -> dict[str, Any]:
     settings = settings or get_settings()
-    if not settings.kafka_bootstrap_servers or not settings.kafka_password:
+    if not settings.kafka_bootstrap_servers:
         raise AppError(
             "Kafka/Event Hubs is not configured", status_code=503, code="kafka_not_configured"
         )
-    return {
+    protocol = (settings.kafka_security_protocol or "PLAINTEXT").upper()
+    cfg: dict[str, Any] = {
         "bootstrap.servers": settings.kafka_bootstrap_servers,
-        "security.protocol": settings.kafka_security_protocol,
-        "sasl.mechanism": settings.kafka_sasl_mechanism,
-        "sasl.username": settings.kafka_username,
-        "sasl.password": settings.kafka_password,
+        "security.protocol": protocol,
     }
+    if protocol != "PLAINTEXT":
+        # SASL credentials are only needed for non-plaintext transports (e.g. Event Hubs SASL_SSL).
+        if not settings.kafka_password:
+            raise AppError(
+                "Kafka/Event Hubs is not configured", status_code=503, code="kafka_not_configured"
+            )
+        cfg["sasl.mechanism"] = settings.kafka_sasl_mechanism
+        cfg["sasl.username"] = settings.kafka_username
+        cfg["sasl.password"] = settings.kafka_password
+    return cfg
 
 
 def build_producer(settings: Settings | None = None) -> Producer:
