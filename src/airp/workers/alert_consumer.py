@@ -113,6 +113,7 @@ class AlertConsumerWorker:
 
         conf = {
             "bootstrap.servers": self.settings.kafka_bootstrap_servers,
+            "security.protocol": (self.settings.kafka_security_protocol or "PLAINTEXT").upper(),
             "group.id": self._consumer_group,
             "auto.offset.reset": self.settings.kafka_auto_offset_reset or "latest",
             "enable.auto.commit": True,

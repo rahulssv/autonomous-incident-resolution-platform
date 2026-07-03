@@ -592,16 +592,16 @@ async def test_langgraph_supervisor_routes_monitoring_correlation_rca_then_embed
     )
 
     event_types = [event["event_type"] for event in state["agent_events"]]
-    # remediation.planned and documentation.drafted run in parallel after rca,
-    # so their relative order is not deterministic — assert membership instead.
-    assert event_types[:4] == [
+    # documentation runs after remediation so it can include the remediation plan.
+    assert event_types == [
         "monitoring.assessed",
         "correlation.completed",
         "rca.started",
         "rca.hypotheses.generated",
+        "remediation.planned",
+        "documentation.drafted",
+        "embedding.generated",
     ]
-    assert set(event_types[4:6]) == {"remediation.planned", "documentation.drafted"}
-    assert event_types[6] == "embedding.generated"
     assert state["monitoring_assessment"]["affected_service"] == "checkout-api"
     assert state["correlation_result"]["repository_url"] == "https://github.com/AIRP-client/checkout-api"
     assert state["rca_plan"]["status"] == "ready_for_evidence_collection"

@@ -232,7 +232,8 @@ def _check_configuration(settings: Settings) -> None:
     missing = []
     if not settings.kafka_bootstrap_servers:
         missing.append("AIRP_KAFKA_BOOTSTRAP_SERVERS")
-    if not settings.kafka_password:
+    # Password is only required for SASL_SSL (Event Hubs); PLAINTEXT local Kafka needs none.
+    if (settings.kafka_security_protocol or "").upper() != "PLAINTEXT" and not settings.kafka_password:
         missing.append("AIRP_KAFKA_PASSWORD")
     if not settings.database_url:
         missing.append("AIRP_DATABASE_URL")
