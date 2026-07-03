@@ -10,7 +10,7 @@ _pool: asyncpg.Pool | None = None
 
 
 def _dsn() -> str | None:
-    raw = os.getenv("AIRP_DATABASE_URL")
+    raw = os.getenv("AIRP_DATABASE_URL", "postgresql+asyncpg://airp:airp@localhost:5432/airp")
     if not raw:
         return None
     return raw.replace("postgresql+asyncpg://", "postgresql://", 1)
