@@ -5,11 +5,9 @@ import {
   tenants as mockTenants
 } from "./mockGithubData.js";
 
-const defaultApiBaseUrl = import.meta.env.DEV
-  ? "http://127.0.0.1:8000"
-  : window.location.origin;
-
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl;
+// In dev, use the same origin as the page (Vite proxies /api → :8000).
+// In production, the backend serves the built frontend from the same origin.
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || window.location.origin;
 
 export const mockDashboardData = {
   source: "mock",
