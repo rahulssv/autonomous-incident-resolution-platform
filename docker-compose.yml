@@ -2,14 +2,17 @@ services:
   kafka:
     image: apache/kafka:latest
     ports:
-      - "9092:9092"
+      - "9092:9092"   # INTERNAL — container-to-container
+      - "9093:9093"   # EXTERNAL — host access (script target)
     environment:
       KAFKA_NODE_ID: 0
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://172.22.0.1:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      # Two listeners: INTERNAL for container-to-container, EXTERNAL for host processes.
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:9093,CONTROLLER://:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9094
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
@@ -287,6 +290,11 @@ services:
       FRONTEND_URL: http://127.0.0.1:8000
       GITHUB_OAUTH_REDIRECT_URI: http://127.0.0.1:8000/api/auth/github/callback
       CORS_ORIGINS: http://127.0.0.1:8000
+      # Connect the frontend to the shared AIRP postgres so real incidents are visible.
+      AIRP_DATABASE_URL: postgresql+asyncpg://airp:airp@postgres:5432/airp
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3).read()\""]
