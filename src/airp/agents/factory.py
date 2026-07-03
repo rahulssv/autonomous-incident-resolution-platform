@@ -10,7 +10,7 @@ from airp.agents.remediation import RemediationAgent
 from airp.agents.supervisor import LangGraphSupervisor
 from airp.core.config import Settings, get_settings
 from airp.integrations.dockerhub.client import DockerHubClient
-from airp.integrations.genaihub.client import AnthropicGatewayClient, GenAIHubClient
+from airp.integrations.genaihub.client import AnthropicGatewayClient, BobGatewayClient, GenAIHubClient
 from airp.integrations.github_mcp.client import GitHubMCPClient
 from airp.integrations.kubernetes_mcp.client import KubernetesMCPClient
 
@@ -18,16 +18,18 @@ from airp.integrations.kubernetes_mcp.client import KubernetesMCPClient
 def build_default_agent_supervisor(settings: Settings | None = None) -> LangGraphSupervisor:
     settings = settings or get_settings()
     genai_client = None
-    if settings.anthropic_base_url and settings.anthropic_auth_token:
+    if settings.bob_auth_token:
+        genai_client = BobGatewayClient(settings)
+    elif settings.anthropic_base_url and settings.anthropic_auth_token:
         genai_client = AnthropicGatewayClient(settings)
     elif settings.gateway_base_url and settings.gateway_api_key:
         genai_client = GenAIHubClient(settings)
 
-    # The Anthropic-style gateway does not expose an OpenAI-compatible /v1/embeddings
-    # route, so prefer the GenAI Hub gateway for embeddings when it is configured.
+    # Bob does not expose /v1/embeddings, so fall back to GenAI Hub for embeddings
+    # when it is also configured. Same for the Anthropic-style gateway.
     embedding_client = genai_client
     if (
-        isinstance(genai_client, AnthropicGatewayClient)
+        isinstance(genai_client, (BobGatewayClient, AnthropicGatewayClient))
         and settings.gateway_base_url
         and settings.gateway_api_key
     ):

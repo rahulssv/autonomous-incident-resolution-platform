@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     gateway_max_retries: int = Field(default=0, ge=0, le=5)
     anthropic_base_url: AnyHttpUrl | None = None
     anthropic_auth_token: str | None = None
+    bob_base_url: AnyHttpUrl = "https://api.us-east.bob.ibm.com"
+    bob_auth_token: str | None = None
+    bob_instance_id: str | None = None
+    bob_team_id: str | None = None
     llm_monitoring_model: str = "gpt-4.1-nano"
     llm_correlation_model: str = "gpt-4.1"
     llm_rca_model: str = "gpt-5.2-CIO"
@@ -147,6 +151,7 @@ class Settings(BaseSettings):
         "kubernetes_mcp_url",
         "github_mcp_url",
         "slack_webhook_url",
+        "bob_base_url",
         mode="before",
     )
     @classmethod
