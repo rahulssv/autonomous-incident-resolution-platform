@@ -1580,6 +1580,31 @@ li {
   background: var(--danger-soft);
 }
 
+.resolution-run-btn {
+  flex: 0 0 auto;
+  padding: 9px 18px;
+  border: 1px solid var(--blue);
+  border-radius: 8px;
+  background: var(--blue);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.resolution-run-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.resolution-run-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.resolution-run-btn.running {
+  background: var(--blue-soft);
+  color: var(--blue);
+  border-color: rgba(50, 109, 159, 0.35);
+}
+
 .resolution-control-strip {
   min-width: 0;
   max-width: 100%;

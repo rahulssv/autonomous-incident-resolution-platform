@@ -326,7 +326,14 @@ function App() {
         if (cancelled) return;
         setOauthConfigured(authSession.oauthConfigured !== false);
         if (authSession.authenticated) {
-          const nextDashboard = authSessionToDashboard(authSession, mockDashboardData);
+          // Pass an empty-incidents baseline so mock incidents don't bleed through
+          // after real auth succeeds. The dashboard data will be populated by the
+          // subsequent fetchDashboardData call using the real GitHub org.
+          const nextDashboard = authSessionToDashboard(authSession, {
+            ...mockDashboardData,
+            incidents: [],
+            auditEvents: []
+          });
           setDashboardData(nextDashboard);
           setSignedIn(true);
           const firstTenant = nextDashboard.tenants[0];
@@ -724,6 +731,7 @@ function ResolutionConsoleView() {
   const isRunningRef = useRef(false);
   const [stageItems, setStageItems] = useState(resolutionStages);
   const [queue, setQueue] = useState([]);
+  const [queueSource, setQueueSource] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [pollStatus, setPollStatus] = useState("Polling unresolved incidents");
   const [detailLoading, setDetailLoading] = useState(false);
@@ -821,6 +829,7 @@ function ResolutionConsoleView() {
         if (cancelled) return;
         const items = payload.items || [];
         setQueue(items);
+        setQueueSource(payload.source || "");
         setGraphError("");
         setPollStatus(`Polling active - ${items.length} unresolved`);
         if (!selectedIdRef.current || !items.some((item) => item.id === selectedIdRef.current)) {
@@ -867,7 +876,7 @@ function ResolutionConsoleView() {
     setDocumentationDraft([]);
   }
 
-  function applyResolutionDetail(payload) {
+  function applyResolutionDetail(payload, { preserveRunStatus = false } = {}) {
     if (payload.stages?.length) {
       setStageItems(payload.stages);
       stageItemsRef.current = payload.stages;
@@ -887,8 +896,10 @@ function ResolutionConsoleView() {
         description: nextIncident.description,
         issueCreated: nextIncident.issueCreated
       });
-      setRunState(nextIncident.issueCreated ? "Issue Created" : nextIncident.status || "Unresolved");
-      setRunStatus(nextIncident.issueCreated ? "done" : "");
+      if (!preserveRunStatus) {
+        setRunState(nextIncident.issueCreated ? "Issue Created" : nextIncident.status || "Unresolved");
+        setRunStatus(nextIncident.issueCreated ? "done" : "");
+      }
     }
 
     setActiveStageId(payload.currentStage || "");
@@ -924,8 +935,7 @@ function ResolutionConsoleView() {
     stream.addEventListener("metadata", (event) => {
       const data = parseStreamEvent(event);
       if (data.detail) {
-        applyResolutionDetail(data.detail);
-        setRunStatus("running");
+        applyResolutionDetail(data.detail, { preserveRunStatus: true });
       }
       if (data.incident) {
         setIncident((current) => ({
@@ -950,15 +960,17 @@ function ResolutionConsoleView() {
 
     stream.addEventListener("stage_completed", (event) => {
       const data = parseStreamEvent(event);
-      const stage = stageItemsRef.current.find((item) => item.id === data.stage);
+      const completedStage = stageItemsRef.current.find((item) => item.id === data.stage);
+      const nextStageItem = stageItemsRef.current.find((item) => item.id === data.nextStage);
       // Add ONLY this stage to completedStages — animates one-at-a-time.
       // Don't blat with data.detail.completedStages (it may already contain all stages
       // for live polling against an already-progressing workflow).
       setCompletedStages((current) => [...new Set([...current, data.stage])]);
       setActiveStageId(data.nextStage || "");
-      setActiveStageTitle(stage?.label || data.stage || "Stage");
+      // Show the NEXT stage as "current phase", not the one that just finished.
+      setActiveStageTitle(nextStageItem?.label || stageLabelFor(data.nextStage, stageItemsRef.current) || completedStage?.label || data.stage || "Stage");
       const dur = data.duration_ms != null ? ` (${(data.duration_ms / 1000).toFixed(2)}s)` : "";
-      setStageSummary(`${stage?.label || data.stage} completed${dur}.`);
+      setStageSummary(`${completedStage?.label || data.stage} completed${dur}.`);
       updateResolutionMetrics(data.snapshot, setMetrics);
       setIncident((current) =>
         current ? { ...current, status: data.nextStage ? "Resolving" : "Resolved" } : current
@@ -1015,17 +1027,29 @@ function ResolutionConsoleView() {
           <p className="resolution-eyebrow">Incident operations</p>
           <h2>Autonomous Incident Resolution</h2>
           <p>
-            Poll unresolved LangGraph incidents, inspect each node state, and run the
+            Poll unresolved incidents, inspect each agent node state, and stream the
             selected incident through the resolution pipeline.
           </p>
         </div>
-        <div className={`resolution-run-state ${runStatus}`}>{runState}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <button
+            className={`resolution-run-btn${isRunning ? " running" : ""}`}
+            disabled={!selectedId || isRunning}
+            onClick={() => startSelectedResolution()}
+            title={isRunning ? "Resolution is running" : selectedId ? "Stream resolution for selected incident" : "Select an incident first"}
+          >
+            {isRunning ? "Running…" : "Run Resolution"}
+          </button>
+          <div className={`resolution-run-state ${runStatus}`}>{runState}</div>
+        </div>
       </section>
 
       <section className="resolution-workspace">
         <aside className="resolution-queue-panel" aria-label="Unresolved incidents">
           <div className="resolution-panel-heading">
-            <p className="resolution-eyebrow">LangGraph queue</p>
+            <p className="resolution-eyebrow">
+              {queueSource === "airp-backend" ? "AIRP backend" : queueSource === "mixed" ? "AIRP + demo" : "LangGraph demo"}
+            </p>
             <h3>Unresolved Incidents</h3>
             <span>{pollStatus}</span>
           </div>
@@ -1070,20 +1094,24 @@ function ResolutionConsoleView() {
                   <h3>{incident.title}</h3>
                 </div>
                 <ol className="resolution-stage-list">
-                  {stageItems.map((stage, index) => (
-                    <li
-                      key={stage.id}
-                      className={`resolution-stage-item ${
-                        activeStageId === stage.id ? "current" : ""
-                      } ${completedStages.includes(stage.id) ? "complete" : ""}`}
-                    >
-                      <span className="resolution-stage-dot">{index + 1}</span>
-                      <span>
-                        <span className="resolution-stage-name">{stage.label}</span>
-                        <span className="resolution-stage-agent">{stage.agent}</span>
-                      </span>
-                    </li>
-                  ))}
+                  {stageItems.map((stage, index) => {
+                    const isActive = activeStageId === stage.id;
+                    const isDone = completedStages.includes(stage.id);
+                    return (
+                      <li
+                        key={stage.id}
+                        className={`resolution-stage-item${isActive ? " current" : ""}${isDone ? " complete" : ""}`}
+                      >
+                        <span className="resolution-stage-dot">{index + 1}</span>
+                        <span>
+                          <span className="resolution-stage-name">{stage.label}</span>
+                          <span className="resolution-stage-agent">
+                            {isActive ? <strong>{stage.agent}</strong> : stage.agent}
+                          </span>
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ol>
               </section>
 
@@ -1124,7 +1152,14 @@ function ResolutionConsoleView() {
                   <article className="resolution-agent-output">
                     <div className="resolution-panel-heading">
                       <p className="resolution-eyebrow">Current Phase</p>
-                      <h3>{activeStageTitle}</h3>
+                      <h3>
+                        {activeStageTitle}
+                        {activeStageId && stageItems.find((s) => s.id === activeStageId)?.agent && (
+                          <span style={{ fontWeight: "normal", fontSize: "0.75em", marginLeft: "0.5em", color: "var(--c-muted, #57606a)" }}>
+                            — {stageItems.find((s) => s.id === activeStageId).agent}
+                          </span>
+                        )}
+                      </h3>
                     </div>
                     <p className="resolution-summary">{stageSummary}</p>
                     <dl className="resolution-metrics">
