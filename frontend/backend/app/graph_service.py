@@ -486,6 +486,20 @@ def _service_from_events(events: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _signal_from_events(events: list[dict[str, Any]]) -> str | None:
+    for evt in events:
+        p = evt.get("payload") or {}
+        if evt["event_type"] == "alert.validated":
+            signal = p.get("signal_type") or p.get("alert_name") or p.get("signal")
+            if signal:
+                return signal
+        if evt["event_type"] == "monitoring.assessed":
+            signal = p.get("signal_type") or p.get("alert_name")
+            if signal:
+                return signal
+    return None
+
+
 def _real_incident_detail(row: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
     completed, current = airp_db.derive_stage_progress(events)
     status_raw = row.get("status") or ""
@@ -498,9 +512,13 @@ def _real_incident_detail(row: dict[str, Any], events: list[dict[str, Any]]) -> 
     doc = airp_db.latest_artifact(events, "documentation.drafted") or {}
     remediation = airp_db.latest_artifact(events, "remediation.planned") or {}
 
+    repo_url = issue.get("repository_url") or ""
+    repo_parts = repo_url.rsplit("/", 2)
+    repo_str = "/".join(repo_parts[-2:]) if len(repo_parts) >= 2 else repo_url
+
     issue_created = (
         {
-            "repo": (issue.get("repository_url") or "").rsplit("/", 2)[-2:],
+            "repo": repo_str,
             "number": issue.get("external_id"),
             "url": issue.get("artifact_url"),
         }
@@ -530,7 +548,7 @@ def _real_incident_detail(row: dict[str, Any], events: list[dict[str, Any]]) -> 
             "status": _status_label(status_raw, current),
             "description": row.get("description") or "",
             "scenario": "real",
-            "signal": "AIRP backend incident",
+            "signal": _signal_from_events(events) or "AIRP incident",
             "service": _service_from_events(events) or "unknown",
             "updatedAt": _iso(row.get("updated_at") or row.get("created_at")),
             "issueCreated": issue_created,
