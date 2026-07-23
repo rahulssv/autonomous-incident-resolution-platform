@@ -149,10 +149,19 @@ def _configured_dependency(
 
 
 def _llm_gateway_status(settings: Settings) -> dict[str, object]:
+    # Priority order matches factory.py: Bob CLI > Anthropic > GenAI Hub.
+    bob_configured = bool(settings.bob_auth_token)
     anthropic_configured = bool(
         settings.anthropic_base_url and settings.anthropic_auth_token
     )
     genaihub_configured = bool(settings.gateway_base_url and settings.gateway_api_key)
+    if bob_configured:
+        return {
+            "provider": "bob_cli",
+            "base_url": None,  # CLI does not use an HTTP base URL
+            "configured": True,
+            "required": True,
+        }
     if anthropic_configured:
         return {
             "provider": "anthropic",

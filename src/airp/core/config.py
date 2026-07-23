@@ -39,10 +39,16 @@ class Settings(BaseSettings):
     gateway_max_retries: int = Field(default=0, ge=0, le=5)
     anthropic_base_url: AnyHttpUrl | None = None
     anthropic_auth_token: str | None = None
-    bob_base_url: AnyHttpUrl = "https://api.us-east.bob.ibm.com"
+    # Bob CLI settings.  bob_base_url is retained (accepted but unused) so
+    # existing .env files do not break after the migration.
     bob_auth_token: str | None = None
     bob_instance_id: str | None = None
     bob_team_id: str | None = None
+    bob_cli_path: str = "bob"
+    # ARCHIVED — bob_base_url was used by the old HTTP client.
+    # It is still accepted from the environment so no hard breakage occurs,
+    # but it is no longer referenced by any live code.
+    bob_base_url: AnyHttpUrl | None = None
     llm_monitoring_model: str = "gpt-4.1-nano"
     llm_correlation_model: str = "gpt-4.1"
     llm_rca_model: str = "gpt-5.2-CIO"
@@ -154,6 +160,7 @@ class Settings(BaseSettings):
         "bob_base_url",
         mode="before",
     )
+    # ponytail: bob_base_url kept in validator so legacy .env files still parse cleanly
     @classmethod
     def empty_url_to_none(cls, value: object) -> object:
         if value == "":

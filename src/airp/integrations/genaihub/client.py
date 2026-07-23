@@ -155,56 +155,9 @@ class AnthropicGatewayClient(OpenAICompatibleGatewayClient):
         )
 
 
-class BobGatewayClient(OpenAICompatibleGatewayClient):
-    """OpenAI-compatible client for the IBM Bob inference API.
-
-    Bob uses ``Authorization: Apikey <token>`` (not Bearer) and requires
-    ``x-instance-id`` / ``x-team-id`` headers on every request.  The OpenAI
-    SDK always injects ``Authorization: Bearer <api_key>`` so we cannot use
-    the normal api_key param for auth — instead we pass the real Apikey token
-    via ``default_headers``, which the SDK merges in after its own auth header,
-    effectively overwriting it.
-    """
-
-    def __init__(self, settings: Settings | None = None) -> None:
-        settings = settings or get_settings()
-        if not settings.bob_auth_token:
-            raise AppError(
-                "Bob gateway is not configured",
-                status_code=503,
-                code="bob_gateway_not_configured",
-            )
-        super().__init__(
-            settings=settings,
-            base_url=f"{str(settings.bob_base_url).rstrip('/')}/inference/v1",
-            api_key="bob-placeholder",  # overridden below via default_headers
-            max_retries=settings.gateway_max_retries,
-            provider_name="Bob inference gateway",
-            not_configured_code="bob_gateway_not_configured",
-        )
-        # Bob models (sonnet-4.6 especially) can take >60s on large prompts.
-        # Override auth header and bump httpx timeout — all in one with_options call.
-        bob_headers: dict[str, str] = {
-            "Authorization": f"Apikey {settings.bob_auth_token}",
-        }
-        if settings.bob_instance_id:
-            bob_headers["x-instance-id"] = settings.bob_instance_id
-        if settings.bob_team_id:
-            bob_headers["x-team-id"] = settings.bob_team_id
-        self.client = self.client.with_options(
-            default_headers=bob_headers,
-            http_client=self._bob_http_client(),
-            timeout=120.0,
-        )
-
-    def _bob_http_client(self) -> httpx.Client:
-        import os
-        import ssl
-        ca_bundle = os.getenv("SSL_CERT_FILE", os.getenv("REQUESTS_CA_BUNDLE"))
-        ctx = ssl.create_default_context(cafile=ca_bundle)
-        ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
-        return httpx.Client(verify=ctx, timeout=120.0)
-
+# BobGatewayClient (HTTP/REST) has been archived.
+# See: airp/integrations/genaihub/archived_api_client.py
+# Active replacement: airp/integrations/genaihub/bob_cli_client.BobCLIClient
 
 def _anthropic_openai_base_url(base_url: object | None) -> str | None:
     if not base_url:

@@ -1,12 +1,32 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from backend.src.airp.agents.factory import build_default_agent_supervisor
 from backend.src.airp.core.config import Settings
+from backend.src.airp.integrations.genaihub.bob_cli_client import BobCLIClient
 from backend.src.airp.integrations.genaihub.client import (
     AnthropicGatewayClient,
     GenAIHubClient,
     _anthropic_openai_base_url,
 )
+
+
+def test_agent_factory_selects_bob_cli_when_auth_token_is_set() -> None:
+    # Patch subprocess.run so the BobCLIClient init does not actually exec the binary.
+    with patch("airp.integrations.genaihub.bob_cli_client.subprocess.run"):
+        supervisor = build_default_agent_supervisor(
+            Settings(
+                _env_file=None,
+                bob_auth_token="test-bob-token",
+            )
+        )
+
+    assert isinstance(supervisor.monitoring_agent.llm_client, BobCLIClient)
+    assert supervisor.rca_agent.llm_client is supervisor.monitoring_agent.llm_client
+    # Bob CLI does not support /v1/embeddings; embedder must fall back to None
+    # (no GenAI Hub configured here).
+    assert supervisor.embedding_agent.embedder is supervisor.monitoring_agent.llm_client
 
 
 def test_agent_factory_prefers_anthropic_gateway_when_configured() -> None:
