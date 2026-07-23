@@ -49,6 +49,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# "src" gives pytest (and therefore the tests) direct access to ``airp.*``
+# regardless of whether the editable install is active.
+# The editable .pth also adds src/ via .venv when running outside pytest.
+pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 100
