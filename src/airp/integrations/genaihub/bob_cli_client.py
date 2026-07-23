@@ -1,10 +1,15 @@
 """Bob CLI client — drives the locally-installed ``bob`` binary.
 
-This module replaces the archived HTTP-based :class:`~airp.integrations.genaihub.archived_api_client._ArchivedBobGatewayClient`.
+This module replaces the archived HTTP-based
+:class:`~airp.integrations.genaihub.archived_api_client._ArchivedBobGatewayClient`.
 Instead of making direct REST calls to the Bob API endpoint, every request
 is executed as a subprocess:
 
-    bob --model <model> --output-format json [--instance-id ...] [--team-id ...] <prompt>
+    bob --model <model> --output-format stream-json [--instance-id ...] [--team-id ...] <prompt>
+
+The CLI writes one JSON object per line (NDJSON).  The assistant's reply is
+carried in the ``tool_use`` event where ``tool_name == "attempt_completion"``
+under ``parameters.result``.  The final ``result`` line contains stats.
 
 Authentication is injected by writing ``AIRP_BOB_AUTH_TOKEN`` into the
 subprocess environment before each call (the CLI picks it up automatically).
@@ -65,11 +70,15 @@ def _build_cli_env(settings: Settings) -> dict[str, str]:
 
 
 def _build_base_cmd(settings: Settings, model: str) -> list[str]:
-    """Build the base ``bob`` command list (without the prompt)."""
+    """Build the base ``bob`` command list (without the prompt).
+
+    Uses ``--output-format stream-json`` so the response is machine-parseable
+    NDJSON.  The ``--model`` flag routes to the correct per-task model.
+    """
     cmd: list[str] = [
         settings.bob_cli_path,
         "--model", model,
-        "--output-format", "json",
+        "--output-format", "stream-json",
     ]
     if settings.bob_instance_id:
         cmd += ["--instance-id", settings.bob_instance_id]
@@ -78,14 +87,19 @@ def _build_base_cmd(settings: Settings, model: str) -> list[str]:
     return cmd
 
 
-def _run_cli(cmd: list[str], prompt: str, env: dict[str, str]) -> dict[str, Any]:
-    """Execute the CLI, capture JSON output, and return the parsed payload.
+def _run_cli(cmd: list[str], prompt: str, env: dict[str, str]) -> str:
+    """Execute the CLI and return the assistant's response text.
 
-    Raises ``AppError`` on non-zero exit codes or unparseable output.
+    The CLI emits one JSON object per line (NDJSON).  The response is in the
+    ``tool_use`` event where ``tool_name == "attempt_completion"`` under
+    ``parameters.result``.  The final ``result`` line contains stats only.
+
+    Raises ``AppError`` on non-zero exit codes, missing response, or parse
+    failures.
     """
     full_cmd = cmd + [prompt]
     try:
-        result = subprocess.run(
+        proc = subprocess.run(
             full_cmd,
             capture_output=True,
             text=True,
@@ -101,59 +115,60 @@ def _run_cli(cmd: list[str], prompt: str, env: dict[str, str]) -> dict[str, Any]
         ) from exc
     except FileNotFoundError as exc:
         raise AppError(
-            "Bob CLI executable not found. Ensure 'bob' is installed and AIRP_BOB_CLI_PATH is correct.",
+            "Bob CLI executable not found. "
+            "Ensure 'bob' is installed and AIRP_BOB_CLI_PATH is correct.",
             status_code=503,
             code="bob_cli_not_found",
         ) from exc
 
-    if result.returncode != 0:
-        stderr_snippet = result.stderr[:500] if result.stderr else "(no stderr)"
+    if proc.returncode != 0:
+        stderr_snippet = proc.stderr[:500] if proc.stderr else "(no stderr)"
         raise AppError(
-            f"Bob CLI exited with code {result.returncode}: {stderr_snippet}",
+            f"Bob CLI exited with code {proc.returncode}: {stderr_snippet}",
             status_code=502,
             code="bob_cli_error",
         )
 
-    raw = result.stdout.strip()
-    if not raw:
+    return _parse_stream_json(proc.stdout)
+
+
+def _parse_stream_json(stdout: str) -> str:
+    """Extract the assistant reply from ``--output-format stream-json`` output.
+
+    The CLI writes one JSON object per line.  The response text is stored in::
+
+        {"type": "tool_use", "tool_name": "attempt_completion",
+         "parameters": {"result": "<text>"}, ...}
+
+    If no ``attempt_completion`` event is present the final non-empty line is
+    tried as a fallback (forward-compat: future CLI versions may change names).
+    """
+    last_non_empty = ""
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        last_non_empty = line
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (
+            obj.get("type") == "tool_use"
+            and obj.get("tool_name") == "attempt_completion"
+        ):
+            result = obj.get("parameters", {}).get("result", "")
+            return str(result).strip()
+
+    if not last_non_empty:
         raise AppError(
             "Bob CLI returned empty output",
             status_code=502,
             code="bob_cli_empty_response",
         )
-
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as exc:
-        snippet = raw[:200]
-        raise AppError(
-            f"Bob CLI returned non-JSON output: {snippet!r}",
-            status_code=502,
-            code="bob_cli_invalid_json",
-        ) from exc
-
-
-def _extract_text(payload: dict[str, Any]) -> str:
-    """Pull the assistant's text content out of the CLI JSON payload.
-
-    The CLI returns::
-
-        {"response": "...", "stats": {...}}
-
-    for ``--output-format json``.  We also handle the OpenAI-shaped response
-    structure in case a future CLI version changes the format.
-    """
-    # Primary format: {"response": "...", "stats": {...}}
-    if "response" in payload:
-        return str(payload["response"])
-
-    # Fallback: OpenAI-shaped choices array (future-proofing)
-    choices = payload.get("choices") or []
-    if choices:
-        return str(choices[0].get("message", {}).get("content", ""))
-
     raise AppError(
-        "Bob CLI JSON response contains no recognisable content field",
+        "Bob CLI stream-json contained no attempt_completion event. "
+        f"Last line: {last_non_empty[:200]!r}",
         status_code=502,
         code="bob_cli_no_content",
     )
@@ -178,10 +193,12 @@ class BobCLIClient:
     CLI invocation::
 
         bob --model <model> \\
-            --output-format json \\
+            --output-format stream-json \\
             [--instance-id <id>] \\
             [--team-id <id>] \\
             "<prompt>"
+
+    The response is parsed from the ``attempt_completion`` tool_use NDJSON event.
     """
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -220,9 +237,11 @@ class BobCLIClient:
             logger.debug("bob_cli chat request_id=%s model=%s", request_id, model)
 
         started = time.monotonic()
-        payload = _run_cli(cmd, prompt, env)
-        payload["_airp_latency_ms"] = int((time.monotonic() - started) * 1000)
-        return payload
+        content = _run_cli(cmd, prompt, env)
+        return {
+            "content": content,
+            "_airp_latency_ms": int((time.monotonic() - started) * 1000),
+        }
 
     def structured_chat(
         self,
@@ -256,7 +275,7 @@ class BobCLIClient:
             max_tokens=max_tokens,
             request_id=request_id,
         )
-        content = _extract_text(payload)
+        content = payload["content"]
         try:
             return response_model.model_validate_json(content)
         except ValidationError:
@@ -296,8 +315,7 @@ class BobCLIClient:
             )
             cmd = _build_base_cmd(self.settings, effective_model)
             env = _build_cli_env(self.settings)
-            result = _run_cli(cmd, prompt, env)
-            content = _extract_text(result)
+            content = _run_cli(cmd, prompt, env)
             # Expect the model to return a JSON array of floats.
             try:
                 vec = json.loads(content)
