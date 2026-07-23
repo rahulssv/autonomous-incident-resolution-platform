@@ -91,6 +91,7 @@ class DependencyProbeRunner:
             return ProbeResult(True)
 
     def _llm_gateway_base_url(self) -> object | None:
+        # Bob CLI has no HTTP base URL to probe — skip it in active checks.
         if self.settings.anthropic_base_url and self.settings.anthropic_auth_token:
             return self.settings.anthropic_base_url
         if self.settings.gateway_base_url and self.settings.gateway_api_key:
