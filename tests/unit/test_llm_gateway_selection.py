@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from backend.src.airp.agents.factory import build_default_agent_supervisor
-from backend.src.airp.core.config import Settings
-from backend.src.airp.integrations.genaihub.bob_cli_client import BobCLIClient
-from backend.src.airp.integrations.genaihub.client import (
+from airp.agents.factory import build_default_agent_supervisor
+from airp.core.config import Settings
+from airp.integrations.genaihub.bob_cli_client import BobCLIClient
+from airp.integrations.genaihub.client import (
     AnthropicGatewayClient,
     GenAIHubClient,
     _anthropic_openai_base_url,

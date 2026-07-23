@@ -24,8 +24,10 @@ import json
 import logging
 import os
 import subprocess
+import tempfile
 import time
 from collections.abc import Sequence
+from functools import lru_cache
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -74,8 +76,17 @@ def _build_base_cmd(settings: Settings, model: str) -> list[str]:
 
     Uses ``--output-format stream-json`` so the response is machine-parseable
     NDJSON.  The ``--model`` flag routes to the correct per-task model.
+
+    The CLI ships as the npm package ``bobshell``, whose real entrypoint is
+    ``bundle/bob.js``.  On a workstation, npm installs an executable shim on
+    PATH, so ``bob`` can be spawned directly.  In a container the bundle is
+    usually copied in without npm's shim (and often without the exec bit), so
+    a ``.js`` path is spawned through ``node`` explicitly.
     """
-    cmd: list[str] = [
+    cmd: list[str] = []
+    if settings.bob_cli_path.endswith(".js"):
+        cmd.append("node")
+    cmd += [
         settings.bob_cli_path,
         "--model", model,
         "--output-format", "stream-json",
@@ -85,6 +96,58 @@ def _build_base_cmd(settings: Settings, model: str) -> list[str]:
     if settings.bob_team_id:
         cmd += ["--team-id", settings.bob_team_id]
     return cmd
+
+
+def _flatten_messages(messages: Sequence[dict[str, Any]]) -> str:
+    """Render OpenAI-style messages as a single plain-text prompt.
+
+    The CLI is an agentic shell that accepts one natural-language task, not a
+    chat-completions message array.  Handing it a serialised
+    ``[{"role": "system", ...}, {"role": "user", ...}]`` payload makes it
+    refuse the request as a prompt-injection attempt ("Task declined: the
+    submitted task was a prompt injection attempt embedding role: system /
+    role: user LLM API messages"), which surfaces downstream as an RCA
+    escalation.  System turns therefore become leading instructions and the
+    remaining turns become the input payload, with no role envelope.
+    """
+    instructions: list[str] = []
+    inputs: list[str] = []
+    for message in messages:
+        content = message.get("content", "")
+        if not isinstance(content, str):
+            content = json.dumps(content, separators=(",", ":"), default=str)
+        if message.get("role") == "system":
+            instructions.append(content)
+        else:
+            inputs.append(content)
+
+    prompt = "\n\n".join(instructions)
+    if inputs:
+        prompt = f"{prompt}\n\nINPUT:\n" + "\n\n".join(inputs)
+    return prompt.strip()
+
+
+@lru_cache(maxsize=1)
+def _cli_workdir() -> str:
+    """Return a writable scratch directory to run the CLI subprocess in.
+
+    Bob treats its working directory as a workspace and writes session state
+    into ``<cwd>/.bob`` (currently ``.bob/.bob-errors/errors-<date>.log``) on
+    every invocation.  Inheriting the app's own cwd therefore drops a ``.bob``
+    directory into the source tree, and fails outright when the container
+    rootfs is read-only.  A scratch directory is created once per process;
+    ``TMPDIR`` selects where it lives.
+    """
+    try:
+        return tempfile.mkdtemp(prefix="airp-bob-")
+    except OSError as exc:
+        raise AppError(
+            f"Bob CLI scratch directory could not be created: {exc}. "
+            "Point TMPDIR at a writable path (a read-only rootfs needs a "
+            "tmpfs or emptyDir mount).",
+            status_code=503,
+            code="bob_cli_workdir_unwritable",
+        ) from exc
 
 
 def _run_cli(cmd: list[str], prompt: str, env: dict[str, str]) -> str:
@@ -98,6 +161,7 @@ def _run_cli(cmd: list[str], prompt: str, env: dict[str, str]) -> str:
     failures.
     """
     full_cmd = cmd + [prompt]
+    workdir = _cli_workdir()
     try:
         proc = subprocess.run(
             full_cmd,
@@ -105,6 +169,7 @@ def _run_cli(cmd: list[str], prompt: str, env: dict[str, str]) -> str:
             text=True,
             timeout=_CLI_TIMEOUT_SECONDS,
             env=env,
+            cwd=workdir,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
@@ -115,10 +180,21 @@ def _run_cli(cmd: list[str], prompt: str, env: dict[str, str]) -> str:
         ) from exc
     except FileNotFoundError as exc:
         raise AppError(
-            "Bob CLI executable not found. "
-            "Ensure 'bob' is installed and AIRP_BOB_CLI_PATH is correct.",
+            f"Bob CLI executable not found: {full_cmd[0]!r}. "
+            "Ensure 'bob' is installed and AIRP_BOB_CLI_PATH is correct "
+            "(a .js bundle path additionally requires 'node' on PATH).",
             status_code=503,
             code="bob_cli_not_found",
+        ) from exc
+    except OSError as exc:
+        # e.g. PermissionError / "Exec format error" — a bob.js bundle copied
+        # into an image loses npm's exec bit, so the shebang is never honoured.
+        raise AppError(
+            f"Bob CLI at {full_cmd[0]!r} could not be executed: {exc}. "
+            "Set AIRP_BOB_CLI_PATH to the bob.js bundle (it is run via 'node') "
+            "or restore the executable bit on the binary.",
+            status_code=503,
+            code="bob_cli_not_executable",
         ) from exc
 
     if proc.returncode != 0:
@@ -221,14 +297,15 @@ class BobCLIClient:
     ) -> dict[str, Any]:
         """Send a chat-style prompt to the Bob CLI and return the raw payload.
 
-        ``messages`` is serialised to a compact JSON string and passed as the
-        positional prompt argument.  Temperature and max_tokens are advisory
-        only — the CLI does not expose these flags; they are retained in the
-        signature for interface compatibility.
+        ``messages`` is flattened to a single plain-text prompt (see
+        :func:`_flatten_messages`) and passed as the positional prompt
+        argument.  Temperature and max_tokens are advisory only — the CLI does
+        not expose these flags; they are retained in the signature for
+        interface compatibility.
         """
         _ = temperature, max_tokens  # ponytail: CLI does not expose these flags
         sanitized = redact_payload(list(messages))
-        prompt = json.dumps(sanitized, separators=(",", ":"))
+        prompt = _flatten_messages(sanitized)
 
         cmd = _build_base_cmd(self.settings, model)
         env = _build_cli_env(self.settings)

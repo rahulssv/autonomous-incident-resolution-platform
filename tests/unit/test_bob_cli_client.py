@@ -19,6 +19,7 @@ Captured from a real run:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -30,6 +31,7 @@ from airp.core.errors import AppError
 from airp.integrations.genaihub.bob_cli_client import (
     BobCLIClient,
     _build_base_cmd,
+    _flatten_messages,
     _parse_stream_json,
     _run_cli,
 )
@@ -153,6 +155,12 @@ def test_build_base_cmd_includes_model_and_stream_json() -> None:
     assert cmd == ["bob", "--model", "sonnet-4.6", "--output-format", "stream-json"]
 
 
+def test_build_base_cmd_prefixes_node_for_js_path() -> None:
+    s = Settings(_env_file=None, bob_auth_token="tok", bob_cli_path="/opt/bobshell/bundle/bob.js")
+    cmd = _build_base_cmd(s, "sonnet-4.6")
+    assert cmd == ["node", "/opt/bobshell/bundle/bob.js", "--model", "sonnet-4.6", "--output-format", "stream-json"]
+
+
 def test_build_base_cmd_appends_instance_and_team_ids() -> None:
     s = Settings(
         _env_file=None,
@@ -213,6 +221,68 @@ def test_run_cli_raises_when_binary_not_found() -> None:
         with pytest.raises(AppError) as exc_info:
             _run_cli(cmd, "prompt", env)
     assert exc_info.value.code == "bob_cli_not_found"
+
+
+def test_flatten_messages_emits_plain_prompt_without_role_envelope() -> None:
+    """A serialised role/content array makes the CLI refuse the task as prompt injection."""
+    prompt = _flatten_messages(
+        [
+            {"role": "system", "content": "Return ONLY JSON."},
+            {"role": "user", "content": '{"incident_id":"INC-1"}'},
+        ]
+    )
+    assert '"role"' not in prompt
+    assert "Return ONLY JSON." in prompt
+    assert '{"incident_id":"INC-1"}' in prompt
+    # Instructions must lead; the untrusted payload follows.
+    assert prompt.index("Return ONLY JSON.") < prompt.index('{"incident_id":"INC-1"}')
+
+
+def test_chat_passes_flattened_prompt_to_cli() -> None:
+    with patch(
+        "airp.integrations.genaihub.bob_cli_client.subprocess.run",
+        return_value=_fake_proc(stdout=_make_stream("ok")),
+    ) as run_mock:
+        BobCLIClient(_SETTINGS).chat(
+            model="sonnet-4.6",
+            messages=[
+                {"role": "system", "content": "Be terse."},
+                {"role": "user", "content": "why did checkout-api fail"},
+            ],
+        )
+    prompt = run_mock.call_args[0][0][-1]
+    assert '"role"' not in prompt
+    assert "Be terse." in prompt
+    assert "why did checkout-api fail" in prompt
+
+
+def test_run_cli_runs_in_a_writable_scratch_dir_not_the_app_cwd() -> None:
+    """Bob writes <cwd>/.bob session state, which must not land in the source tree."""
+    cmd = ["bob", "--model", "m", "--output-format", "stream-json"]
+    env = {"BOB_API_KEY": "tok"}
+    with patch(
+        "airp.integrations.genaihub.bob_cli_client.subprocess.run",
+        return_value=_fake_proc(stdout=_make_stream("ok")),
+    ) as run_mock:
+        _run_cli(cmd, "prompt", env)
+    workdir = run_mock.call_args.kwargs["cwd"]
+    assert workdir is not None
+    assert workdir != os.getcwd()
+    assert os.path.isdir(workdir)
+    assert os.access(workdir, os.W_OK)
+
+
+def test_run_cli_raises_when_binary_is_not_executable() -> None:
+    """A .js bundle copied without the exec bit raises PermissionError, not FileNotFoundError."""
+    cmd = ["/opt/bobshell/bundle/bob.js", "--model", "m", "--output-format", "stream-json"]
+    env = {"BOB_API_KEY": "tok"}
+    with patch(
+        "airp.integrations.genaihub.bob_cli_client.subprocess.run",
+        side_effect=PermissionError(13, "Permission denied"),
+    ):
+        with pytest.raises(AppError) as exc_info:
+            _run_cli(cmd, "prompt", env)
+    assert exc_info.value.code == "bob_cli_not_executable"
 
 
 def test_run_cli_returns_text_from_attempt_completion() -> None:
