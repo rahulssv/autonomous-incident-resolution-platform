@@ -9,17 +9,17 @@ Usage:
   python scripts/create-incident.py
 
   # Choose a scenario
-  python scripts/create-incident.py --scenario oom
-  python scripts/create-incident.py --scenario latency
+  .venv/bin/python scripts/create-incident.py --scenario oom
+  .venv/bin/python scripts/create-incident.py --scenario latency
 
   # Override fields
-  python scripts/create-incident.py --service my-svc --namespace staging --severity warning
+  .venv/bin/python scripts/create-incident.py --service my-svc --namespace staging --severity warning
 
   # Custom bootstrap server
-  python scripts/create-incident.py --broker localhost:9093
+  .venv/bin/python scripts/create-incident.py --broker localhost:9093
 
   # Dry-run: print the payload without publishing
-  python scripts/create-incident.py --dry-run
+  .venv/bin/python scripts/create-incident.py --dry-run
 
 Scenarios: crashloop, oom, latency, memory-leak, high-error-rate
 """

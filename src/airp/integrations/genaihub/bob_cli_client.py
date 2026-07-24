@@ -5,7 +5,8 @@ This module replaces the archived HTTP-based
 Instead of making direct REST calls to the Bob API endpoint, every request
 is executed as a subprocess:
 
-    bob --model <model> --output-format stream-json [--instance-id ...] [--team-id ...] <prompt>
+    bob --model <model> --output-format stream-json --accept-license \
+        [--instance-id ...] [--team-id ...] <prompt>
 
 The CLI writes one JSON object per line (NDJSON).  The assistant's reply is
 carried in the ``tool_use`` event where ``tool_name == "attempt_completion"``
@@ -45,11 +46,10 @@ _CLI_TIMEOUT_SECONDS = 120
 
 
 def _ensure_authenticated(settings: Settings) -> None:
-    """Write the auth token into the process environment so the CLI picks it up.
+    """Fail fast when no Bob credential is configured.
 
-    The BOB CLI reads its credentials from the ``BOB_API_KEY`` environment
-    variable (or equivalent).  We set it from ``AIRP_BOB_AUTH_TOKEN`` so that
-    no long-lived credential file is required.
+    The token itself is injected per-subprocess by :func:`_build_cli_env`; the
+    parent process environment is deliberately left untouched.
     """
     if not settings.bob_auth_token:
         raise AppError(
@@ -57,17 +57,24 @@ def _ensure_authenticated(settings: Settings) -> None:
             status_code=503,
             code="bob_cli_not_configured",
         )
-    # The CLI reads the token from the environment; we propagate it here so
-    # that it is always current even if the settings object is refreshed.
-    os.environ.setdefault("BOB_API_KEY", settings.bob_auth_token)
-    # Overwrite unconditionally so a settings reload takes effect.
-    os.environ["BOB_API_KEY"] = settings.bob_auth_token
 
 
 def _build_cli_env(settings: Settings) -> dict[str, str]:
-    """Return an env dict for the subprocess, with auth injected."""
+    """Return an env dict for the subprocess, with auth and HOME injected.
+
+    ``BOBSHELL_API_KEY`` is the variable the CLI actually reads for API-key
+    auth (bobshell auth type ``api-key``).  Any other name is ignored, and the
+    CLI silently falls through to the interactive SSO browser flow, which in a
+    headless worker blocks until its 3-minute auth timeout and then exits 1.
+
+    ``HOME`` is redirected to the scratch workdir because the CLI persists
+    ``$HOME/.bob`` (installation id, settings, license consent, logs) on every
+    run.  The container's service account has ``HOME=/nonexistent``, so an
+    inherited HOME makes the CLI fail before it ever reaches the model.
+    """
     env = os.environ.copy()
-    env["BOB_API_KEY"] = settings.bob_auth_token  # type: ignore[assignment]
+    env["BOBSHELL_API_KEY"] = settings.bob_auth_token  # type: ignore[assignment]
+    env["HOME"] = _cli_workdir()
     return env
 
 
@@ -90,6 +97,10 @@ def _build_base_cmd(settings: Settings, model: str) -> list[str]:
         settings.bob_cli_path,
         "--model", model,
         "--output-format", "stream-json",
+        # Without this the CLI refuses to run on any HOME that has not already
+        # recorded license consent ("A license agreement is required...") and
+        # exits non-zero — which is every fresh scratch HOME we hand it.
+        "--accept-license",
     ]
     if settings.bob_instance_id:
         cmd += ["--instance-id", settings.bob_instance_id]
@@ -258,7 +269,7 @@ class BobCLIClient:
 
     Authentication:
         The CLI is authenticated by injecting ``AIRP_BOB_AUTH_TOKEN`` as the
-        ``BOB_API_KEY`` environment variable before every subprocess call.
+        ``BOBSHELL_API_KEY`` environment variable before every subprocess call.
         No credential files or ``bob login`` flow is required at runtime.
 
     Model routing:
@@ -270,6 +281,7 @@ class BobCLIClient:
 
         bob --model <model> \\
             --output-format stream-json \\
+            --accept-license \\
             [--instance-id <id>] \\
             [--team-id <id>] \\
             "<prompt>"

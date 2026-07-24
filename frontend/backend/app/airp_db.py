@@ -88,7 +88,8 @@ async def fetch_incident(incident_id: str) -> dict[str, Any] | None:
         return None
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, title, description, severity, status, workflow_id, created_at, updated_at "
+            "SELECT id, title, description, severity, status, workflow_id, created_at, updated_at, "
+            "(SELECT count(*) FROM model_calls WHERE incident_id = incidents.id) AS model_call_count "
             "FROM incidents WHERE id = $1",
             incident_id,
         )

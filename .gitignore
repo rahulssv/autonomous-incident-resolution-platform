@@ -27,3 +27,10 @@ build/
 .vscode/
 
 *.pem
+
+# Vendored Bob CLI bundle (populated by scripts/vendor-bob.sh)
+vendor/*
+!vendor/.gitkeep
+
+# Local kind kubeconfig for the kubernetes-mcp overlay (scripts/kind-kubeconfig.sh)
+.kube/

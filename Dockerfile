@@ -16,12 +16,22 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
 
 # bobshell is not published to the public npm registry. Either
 #   (a) build with --build-arg BOB_NPM_REGISTRY=<internal registry>, or
-#   (b) vendor the bundle into ./vendor/bobshell before building.
-# Both land on /usr/local/lib/node_modules/bobshell/bundle/bob.js.
+#   (b) vendor the bundle into ./vendor/bobshell (run scripts/vendor-bob.sh).
+# Both land on /usr/local/lib/node_modules/bobshell/bundle/bob.js. Without one
+# of them the image has no CLI at all and every LLM call fails with
+# "Cannot find module .../bundle/bob.js".
+#
+# vendor/ always exists (it holds a .gitkeep) so this COPY never breaks a build
+# that uses option (a) or no Bob at all.
+COPY vendor/ /tmp/vendor/
 ARG BOB_NPM_REGISTRY=""
 RUN if [ -n "$BOB_NPM_REGISTRY" ]; then \
         npm install -g --registry="$BOB_NPM_REGISTRY" bobshell; \
-    fi
+    elif [ -f /tmp/vendor/bobshell/bundle/bob.js ]; then \
+        mkdir -p /usr/local/lib/node_modules && \
+        cp -r /tmp/vendor/bobshell /usr/local/lib/node_modules/bobshell; \
+    fi; \
+    rm -rf /tmp/vendor
 
 RUN addgroup --system airp && adduser --system --ingroup airp airp
 

@@ -49,11 +49,14 @@ class Settings(BaseSettings):
     # It is still accepted from the environment so no hard breakage occurs,
     # but it is no longer referenced by any live code.
     bob_base_url: AnyHttpUrl | None = None
-    llm_monitoring_model: str = "gpt-4.1-nano"
-    llm_correlation_model: str = "gpt-4.1"
-    llm_rca_model: str = "gpt-5.2-CIO"
-    llm_remediation_model: str = "gpt-5.2-CIO"
-    llm_documentation_model: str = "gpt-4.1"
+    # Bob model names. The old gpt-* defaults were GenAI Hub names that Bob
+    # rejects outright, so any deployment without an explicit .env produced a
+    # failed model call on every agent.
+    llm_monitoring_model: str = "haiku-4.5"
+    llm_correlation_model: str = "sonnet-4.5"
+    llm_rca_model: str = "sonnet-4.6"
+    llm_remediation_model: str = "sonnet-4.6"
+    llm_documentation_model: str = "sonnet-4.5"
     llm_embedding_model: str = "embeddings"
     embedding_enabled: bool = True
     embedding_max_texts: int = Field(default=16, ge=1, le=50)
@@ -203,6 +206,34 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def validate_api_startup_config(settings: Settings) -> None:
+    """Raise when the API is configured into a state it can never serve.
+
+    Auth cannot be switched off — ``core.security.get_current_principal`` 503s
+    when ``auth_enabled`` is false — so auth_enabled-but-unconfigured is not a
+    degraded mode. It is an API that 401s every request with no way to ever mint
+    a valid token. Kept out of ``Settings`` validation so workers, tests and CLI
+    entrypoints, none of which serve HTTP, are unaffected.
+    """
+    if not settings.auth_enabled:
+        return
+    missing = [
+        name
+        for name, value in (
+            ("AIRP_ENTRA_TENANT_ID", settings.entra_tenant_id),
+            ("AIRP_ENTRA_CLIENT_ID", settings.entra_client_id),
+        )
+        if not value
+    ]
+    if missing:
+        verb = "is" if len(missing) == 1 else "are"
+        raise RuntimeError(
+            f"AIRP_AUTH_ENABLED is true but {' and '.join(missing)} {verb} not set, "
+            "so no bearer token can ever be validated. Set the Entra credentials "
+            "to start the API."
+        )
 
 
 def _is_explicit_https_origin(value: str) -> bool:
