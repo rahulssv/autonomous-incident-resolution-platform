@@ -152,13 +152,18 @@ def test_parse_stream_json_tolerates_non_json_lines() -> None:
 
 def test_build_base_cmd_includes_model_and_stream_json() -> None:
     cmd = _build_base_cmd(_SETTINGS, "sonnet-4.6")
-    assert cmd == ["bob", "--model", "sonnet-4.6", "--output-format", "stream-json"]
+    assert cmd == [
+        "bob", "--model", "sonnet-4.6", "--output-format", "stream-json", "--accept-license",
+    ]
 
 
 def test_build_base_cmd_prefixes_node_for_js_path() -> None:
     s = Settings(_env_file=None, bob_auth_token="tok", bob_cli_path="/opt/bobshell/bundle/bob.js")
     cmd = _build_base_cmd(s, "sonnet-4.6")
-    assert cmd == ["node", "/opt/bobshell/bundle/bob.js", "--model", "sonnet-4.6", "--output-format", "stream-json"]
+    assert cmd == [
+        "node", "/opt/bobshell/bundle/bob.js", "--model", "sonnet-4.6",
+        "--output-format", "stream-json", "--accept-license",
+    ]
 
 
 def test_build_base_cmd_appends_instance_and_team_ids() -> None:
@@ -175,6 +180,11 @@ def test_build_base_cmd_appends_instance_and_team_ids() -> None:
     assert "team-1" in cmd
 
 
+def test_build_base_cmd_accepts_license_so_a_fresh_home_does_not_block() -> None:
+    """Without --accept-license the CLI exits non-zero on any HOME lacking consent."""
+    assert "--accept-license" in _build_base_cmd(_SETTINGS, "haiku-4.5")
+
+
 def test_build_base_cmd_omits_ids_when_not_set() -> None:
     cmd = _build_base_cmd(_SETTINGS, "haiku-4.5")
     assert "--instance-id" not in cmd
@@ -188,7 +198,7 @@ def test_build_base_cmd_omits_ids_when_not_set() -> None:
 
 def test_run_cli_raises_on_nonzero_exit() -> None:
     cmd = ["bob", "--model", "m", "--output-format", "stream-json"]
-    env = {"BOB_API_KEY": "tok"}
+    env = {"BOBSHELL_API_KEY": "tok"}
     with patch(
         "airp.integrations.genaihub.bob_cli_client.subprocess.run",
         return_value=_fake_proc(returncode=1, stderr="auth failed"),
@@ -201,7 +211,7 @@ def test_run_cli_raises_on_nonzero_exit() -> None:
 
 def test_run_cli_raises_on_timeout() -> None:
     cmd = ["bob", "--model", "m", "--output-format", "stream-json"]
-    env = {"BOB_API_KEY": "tok"}
+    env = {"BOBSHELL_API_KEY": "tok"}
     with patch(
         "airp.integrations.genaihub.bob_cli_client.subprocess.run",
         side_effect=subprocess.TimeoutExpired(cmd, 120),
@@ -213,7 +223,7 @@ def test_run_cli_raises_on_timeout() -> None:
 
 def test_run_cli_raises_when_binary_not_found() -> None:
     cmd = ["bob-missing", "--model", "m", "--output-format", "stream-json"]
-    env = {"BOB_API_KEY": "tok"}
+    env = {"BOBSHELL_API_KEY": "tok"}
     with patch(
         "airp.integrations.genaihub.bob_cli_client.subprocess.run",
         side_effect=FileNotFoundError(),
@@ -259,7 +269,7 @@ def test_chat_passes_flattened_prompt_to_cli() -> None:
 def test_run_cli_runs_in_a_writable_scratch_dir_not_the_app_cwd() -> None:
     """Bob writes <cwd>/.bob session state, which must not land in the source tree."""
     cmd = ["bob", "--model", "m", "--output-format", "stream-json"]
-    env = {"BOB_API_KEY": "tok"}
+    env = {"BOBSHELL_API_KEY": "tok"}
     with patch(
         "airp.integrations.genaihub.bob_cli_client.subprocess.run",
         return_value=_fake_proc(stdout=_make_stream("ok")),
@@ -275,7 +285,7 @@ def test_run_cli_runs_in_a_writable_scratch_dir_not_the_app_cwd() -> None:
 def test_run_cli_raises_when_binary_is_not_executable() -> None:
     """A .js bundle copied without the exec bit raises PermissionError, not FileNotFoundError."""
     cmd = ["/opt/bobshell/bundle/bob.js", "--model", "m", "--output-format", "stream-json"]
-    env = {"BOB_API_KEY": "tok"}
+    env = {"BOBSHELL_API_KEY": "tok"}
     with patch(
         "airp.integrations.genaihub.bob_cli_client.subprocess.run",
         side_effect=PermissionError(13, "Permission denied"),
@@ -287,7 +297,7 @@ def test_run_cli_raises_when_binary_is_not_executable() -> None:
 
 def test_run_cli_returns_text_from_attempt_completion() -> None:
     cmd = ["bob", "--model", "m", "--output-format", "stream-json"]
-    env = {"BOB_API_KEY": "tok"}
+    env = {"BOBSHELL_API_KEY": "tok"}
     with patch(
         "airp.integrations.genaihub.bob_cli_client.subprocess.run",
         return_value=_fake_proc(stdout=_make_stream("hello from bob")),
@@ -320,7 +330,8 @@ def test_bob_cli_client_chat_passes_model_flag() -> None:
     assert "_airp_latency_ms" in result
 
 
-def test_bob_cli_client_chat_injects_bob_api_key_into_env() -> None:
+def test_bob_cli_client_chat_injects_bobshell_api_key_into_env() -> None:
+    """BOBSHELL_API_KEY is the only name the CLI reads; any other falls back to SSO."""
     received_env: list[dict] = []
 
     def fake_run(_, *, env, **kw):
@@ -331,7 +342,24 @@ def test_bob_cli_client_chat_injects_bob_api_key_into_env() -> None:
         client = BobCLIClient(_SETTINGS)
         client.chat(model="haiku-4.5", messages=[{"role": "user", "content": "hi"}])
 
-    assert received_env[0]["BOB_API_KEY"] == "test-tok"
+    assert received_env[0]["BOBSHELL_API_KEY"] == "test-tok"
+
+
+def test_bob_cli_client_chat_points_home_at_a_writable_scratch_dir() -> None:
+    """The container service account has HOME=/nonexistent; the CLI writes $HOME/.bob."""
+    received_env: list[dict] = []
+
+    def fake_run(_, *, env, **kw):
+        received_env.append(env)
+        return _fake_proc(stdout=_make_stream("ok"))
+
+    with patch("airp.integrations.genaihub.bob_cli_client.subprocess.run", fake_run):
+        client = BobCLIClient(_SETTINGS)
+        client.chat(model="haiku-4.5", messages=[{"role": "user", "content": "hi"}])
+
+    home = received_env[0]["HOME"]
+    assert os.path.isdir(home)
+    assert os.access(home, os.W_OK)
 
 
 def test_bob_cli_client_chat_redacts_secrets_from_prompt() -> None:

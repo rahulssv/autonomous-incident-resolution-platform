@@ -562,7 +562,9 @@ def _real_incident_detail(row: dict[str, Any], events: list[dict[str, Any]]) -> 
         "snapshot": {
             "agent_event_count": len(events),
             "tool_call_count": rca_started.get("tool_call_count") or 0,
-            "model_call_count": 0,
+            # Comes from fetch_incident's model_calls subquery; list rows do not
+            # carry it, so those fall back to 0 rather than reporting nonsense.
+            "model_call_count": row.get("model_call_count") or 0,
         },
         "rca": {
             "hypothesis": (rca_started.get("summary") if rca_started else None),

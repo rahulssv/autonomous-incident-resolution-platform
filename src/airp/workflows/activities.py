@@ -93,6 +93,7 @@ async def _agent_graph_run_async(incident_id: str, workflow_id: str | None = Non
                 service_id=incident.service_id,
                 namespace=incident.namespace,
                 pod_name=incident.pod_name,
+                alert_labels=await _alert_labels(service, incident_id),
             )
 
             supervisor = build_default_agent_supervisor(settings)
@@ -1499,12 +1500,58 @@ async def _service_context(session, service_id: str | None) -> dict[str, Any]:
     }
 
 
+def _workload_context_from_alert(
+    *,
+    namespace: str | None,
+    pod_name: str | None,
+    labels: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build workload context from the incident row and the originating alert.
+
+    The service catalog is optional — it is empty on a fresh deployment and on
+    any service nobody has onboarded. Returning ``{}`` in that case discarded
+    identifiers the alert already carried (namespace, pod, deployment, service),
+    so evidence collection reported "namespace is unavailable" and correlation
+    fell back to the monitoring model's prose guess at the service name, which
+    produced repository URLs like ``.../checkout worker``.
+
+    ``source`` marks this as alert-derived so correlation does not report it as
+    a catalog workload match.
+    """
+    labels = labels or {}
+    context = {
+        "namespace": namespace or labels.get("namespace"),
+        "pod_name": pod_name or labels.get("pod"),
+        "deployment": labels.get("deployment"),
+        "container_name": labels.get("container"),
+        "service_name": labels.get("service"),
+        "image": labels.get("image"),
+    }
+    populated = {key: value for key, value in context.items() if value}
+    if not populated:
+        return {}
+    populated["source"] = "alert_labels"
+    return populated
+
+
+async def _alert_labels(service: IncidentService, incident_id: str) -> dict[str, Any]:
+    """Return the label map from the incident's originating alert, if recorded."""
+    for event in reversed(await service.get_events(incident_id)):
+        if event.event_type != "alert.validated":
+            continue
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        labels = payload.get("labels")
+        return labels if isinstance(labels, dict) else {}
+    return {}
+
+
 async def _workload_context(
     session,
     *,
     service_id: str | None,
     namespace: str | None,
     pod_name: str | None,
+    alert_labels: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     candidate_conditions = []
     if namespace and pod_name:
@@ -1529,7 +1576,9 @@ async def _workload_context(
             break
 
     if workload is None:
-        return {}
+        return _workload_context_from_alert(
+            namespace=namespace, pod_name=pod_name, labels=alert_labels
+        )
     return {
         "id": workload.id,
         "service_id": workload.service_id,

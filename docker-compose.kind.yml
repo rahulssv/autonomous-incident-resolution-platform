@@ -1,0 +1,22 @@
+# Opt-in overlay: point the kubernetes-mcp sidecar at a local kind cluster so
+# RCA collects real pod/event/limit evidence instead of fixtures.
+#
+#   ./scripts/kind-kubeconfig.sh shopfast-local
+#   docker-compose -f docker-compose.yml -f docker-compose.kind.yml up -d
+#
+# Kept out of docker-compose.yml because 'kind' is an external network: naming it
+# in the base file would make every 'docker-compose up' fail on machines that
+# have no kind cluster.
+services:
+  kubernetes-mcp:
+    environment:
+      AIRP_KUBERNETES_MCP_MODE: cluster
+    networks:
+      # 'default' must be restated — listing networks replaces the implicit one,
+      # and the API and worker reach this sidecar over it.
+      - default
+      - kind
+
+networks:
+  kind:
+    external: true

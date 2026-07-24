@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from airp.agents.state import AgentEvent, AgentGraphState, CorrelationResult
 from airp.core.config import Settings, get_settings
 
@@ -28,14 +30,24 @@ class CorrelationAgent:
         workload_context = state.get("workload_context") or {}
         monitoring = state.get("monitoring_assessment") or {}
 
-        service_name = service_context.get("name") or monitoring.get("affected_service")
+        # The alert's own labels beat the monitoring model's prose: it only sees
+        # the incident title, so "OOMKilled in checkout worker" yields the
+        # service name "checkout worker" — a space that makes every derived
+        # repository URL 404.
+        service_name = (
+            service_context.get("name")
+            or workload_context.get("service_name")
+            or workload_context.get("deployment")
+            or monitoring.get("affected_service")
+        )
         repository_url = service_context.get("repository_url")
         if not repository_url and service_name:
             repository_url = self._infer_repository_url(service_name)
         docker_image = service_context.get("docker_image") or workload_context.get("image")
         namespace = service_context.get("namespace") or workload_context.get("namespace")
         pod_name = workload_context.get("pod_name")
-        workload_match = bool(workload_context)
+        # Alert-derived context is not a catalog match and must not claim one.
+        workload_match = bool(workload_context) and workload_context.get("source") != "alert_labels"
 
         context_bits = []
         if service_name:
@@ -70,6 +82,19 @@ class CorrelationAgent:
 
     def _infer_repository_url(self, service_name: str) -> str | None:
         org = (getattr(self.settings, "client_github_org", "") or "").strip()
-        if not org:
+        slug = _repository_slug(service_name)
+        if not org or not slug:
             return None
-        return f"https://github.com/{org}/{service_name}"
+        return f"https://github.com/{org}/{slug}"
+
+
+def _repository_slug(service_name: str) -> str:
+    """Coerce a service name into something that can be a GitHub repository name.
+
+    A guessed URL is only useful if it is well-formed. Whitespace and other
+    characters GitHub does not allow are folded to hyphens rather than
+    interpolated raw, which previously produced unfetchable URLs like
+    ``https://github.com/AIRP-client/checkout worker``.
+    """
+    slug = re.sub(r"[^a-z0-9._-]+", "-", service_name.strip().lower())
+    return slug.strip("-")

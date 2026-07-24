@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from airp.api.router import api_router
-from airp.core.config import get_settings
+from airp.core.config import get_settings, validate_api_startup_config
 from airp.core.errors import register_error_handlers
 from airp.core.logging import configure_logging
 from airp.core.middleware import (
@@ -17,6 +17,8 @@ from airp.core.middleware import (
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
+
+    validate_api_startup_config(settings)
 
     app = FastAPI(
         title=settings.app_name,
