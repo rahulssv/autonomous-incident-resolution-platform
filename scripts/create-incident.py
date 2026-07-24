@@ -21,7 +21,12 @@ Usage:
   # Dry-run: print the payload without publishing
   .venv/bin/python scripts/create-incident.py --dry-run
 
-Scenarios: crashloop, oom, latency, memory-leak, high-error-rate
+  # Demo: trigger the live s5-recommendation ImagePullBackOff on cue
+  POD=$(kubectl get pods -n shopfast -l app=s5-recommendation \
+    -o jsonpath='{.items[0].metadata.name}')
+  .venv/bin/python scripts/create-incident.py --scenario imagepull --pod "$POD"
+
+Scenarios: imagepull, crashloop, oom, latency, memory-leak, high-error-rate
 """
 from __future__ import annotations
 
@@ -58,6 +63,20 @@ SCENARIOS: dict[str, dict] = {
         "namespace": "payments",
         "severity": "critical",
         "signal_type": "CrashLoopBackOff",
+    },
+    "imagepull": {
+        "alert_name": "ImagePullBackOff",
+        "summary": "ImagePullBackOff in recommendation service",
+        "description": (
+            'Failed to pull image "docker.io/ramnathnayak/s5-recommendation:latest": '
+            "no match for platform in manifest — image architecture mismatch."
+        ),
+        "service": "s5-recommendation",
+        "deployment": "s5-recommendation",
+        "pod": "s5-recommendation-797fdb4864-8jwjx",
+        "namespace": "shopfast",
+        "severity": "warning",
+        "signal_type": "ImagePullBackOff",
     },
     "oom": {
         "alert_name": "KubeContainerOOMKilled",
@@ -144,6 +163,11 @@ def _parse_args() -> argparse.Namespace:
         help="Override the Kubernetes namespace",
     )
     parser.add_argument(
+        "--pod",
+        default=None,
+        help="Override the pod name (use the live pod so RCA evidence matches the real cluster)",
+    )
+    parser.add_argument(
         "--environment",
         default=os.getenv("AIRP_E2E_ENVIRONMENT", DEFAULT_ENVIRONMENT),
         help=f"Environment label (default: {DEFAULT_ENVIRONMENT})",
@@ -181,7 +205,7 @@ def _build_event(args: argparse.Namespace) -> tuple[str, dict]:
     summary = args.title or preset["summary"]
     description = preset["description"]
     deployment = preset["deployment"]
-    pod = preset["pod"]
+    pod = args.pod or preset["pod"]
 
     # idempotency_key matches the format used by the AIRP alert consumer
     idempotency_key = f"{environment}:{namespace}:{service}:{alert_name}:{severity}:{fingerprint}"

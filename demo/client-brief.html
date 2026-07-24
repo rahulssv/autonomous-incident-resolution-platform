@@ -1,0 +1,575 @@
+<title>AIRP — What You Just Saw</title>
+<style>
+  :root {
+    --ground: #f2f4f6;
+    --surface: #ffffff;
+    --surface-sunk: #e8ecef;
+    --ink: #131a21;
+    --ink-soft: #45535f;
+    --muted: #6b7a87;
+    --line: #d4dbe1;
+    --accent: #a85a2c;
+    --accent-soft: #f0e2d8;
+    --critical: #9d3535;
+    --warn: #8a6413;
+    --ok: #23675c;
+    --shadow: 0 1px 2px rgba(19, 26, 33, .06), 0 8px 24px -16px rgba(19, 26, 33, .3);
+
+    --display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --body: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0f151b;
+      --surface: #161e26;
+      --surface-sunk: #1d262f;
+      --ink: #e7edf2;
+      --ink-soft: #b3c0cb;
+      --muted: #8b9aa7;
+      --line: #2a353f;
+      --accent: #d98a55;
+      --accent-soft: #33241a;
+      --critical: #e08585;
+      --warn: #d8ab48;
+      --ok: #67ab9c;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+    }
+  }
+
+  :root[data-theme="light"] {
+    --ground: #f2f4f6;
+    --surface: #ffffff;
+    --surface-sunk: #e8ecef;
+    --ink: #131a21;
+    --ink-soft: #45535f;
+    --muted: #6b7a87;
+    --line: #d4dbe1;
+    --accent: #a85a2c;
+    --accent-soft: #f0e2d8;
+    --critical: #9d3535;
+    --warn: #8a6413;
+    --ok: #23675c;
+    --shadow: 0 1px 2px rgba(19, 26, 33, .06), 0 8px 24px -16px rgba(19, 26, 33, .3);
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0f151b;
+    --surface: #161e26;
+    --surface-sunk: #1d262f;
+    --ink: #e7edf2;
+    --ink-soft: #b3c0cb;
+    --muted: #8b9aa7;
+    --line: #2a353f;
+    --accent: #d98a55;
+    --accent-soft: #33241a;
+    --critical: #e08585;
+    --warn: #d8ab48;
+    --ok: #67ab9c;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 47rem;
+    margin: 0 auto;
+    padding: clamp(2rem, 6vw, 4.5rem) clamp(1.1rem, 5vw, 2rem) 5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 3.25rem;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(2.1rem, 6vw, 3.1rem);
+    line-height: 1.1;
+    font-weight: 600;
+    letter-spacing: -.015em;
+    text-wrap: balance;
+    margin: .5rem 0 0;
+  }
+
+  h2 {
+    font-family: var(--display);
+    font-size: 1.45rem;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -.01em;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  h3 {
+    font-size: .95rem;
+    font-weight: 650;
+    margin: 0;
+    letter-spacing: -.005em;
+  }
+
+  p { margin: 0; }
+  strong { font-weight: 650; }
+
+  .lede {
+    font-size: 1.16rem;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    margin-top: 1.1rem;
+    text-wrap: pretty;
+  }
+
+  header {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 2.25rem;
+  }
+
+  .byline {
+    margin-top: 1.75rem;
+    font-family: var(--mono);
+    font-size: .76rem;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem 1.25rem;
+  }
+
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: 1.15rem;
+  }
+
+  .section-head {
+    display: flex;
+    flex-direction: column;
+    gap: .45rem;
+  }
+
+  /* Terminal-ish block: the subject's own material. */
+  .cluster {
+    background: var(--surface-sunk);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow-x: auto;
+  }
+
+  .cluster table {
+    border-collapse: collapse;
+    width: 100%;
+    font-family: var(--mono);
+    font-size: .8rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .cluster th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .09em;
+    font-size: .68rem;
+    padding: .7rem 1rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .cluster td {
+    padding: .42rem 1rem;
+    color: var(--ink-soft);
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  }
+
+  .cluster tr:last-child td { border-bottom: 0; }
+  .cluster td:first-child { color: var(--ink); }
+
+  .state {
+    display: inline-block;
+    padding: .05rem .5rem;
+    border-radius: 3px;
+    font-size: .72rem;
+    font-weight: 600;
+    border: 1px solid currentColor;
+  }
+  .state.bad { color: var(--critical); }
+  .state.warn { color: var(--warn); }
+  .state.good { color: var(--ok); }
+
+  /* The pipeline is a real sequence, so it is numbered. */
+  ol.pipeline {
+    list-style: none;
+    counter-reset: stage;
+    display: flex;
+    flex-direction: column;
+    gap: .55rem;
+  }
+
+  ol.pipeline li {
+    counter-increment: stage;
+    display: grid;
+    grid-template-columns: 2rem 1fr;
+    gap: .1rem 1rem;
+    align-items: baseline;
+    padding: .8rem 1rem .85rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  ol.pipeline li:last-child { border-bottom: 0; }
+
+  ol.pipeline li::before {
+    content: counter(stage, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: .74rem;
+    color: var(--accent);
+    letter-spacing: .05em;
+  }
+
+  ol.pipeline p {
+    grid-column: 2;
+    font-size: .92rem;
+    color: var(--ink-soft);
+    margin-top: .15rem;
+  }
+
+  .findings {
+    display: flex;
+    flex-direction: column;
+    gap: .9rem;
+  }
+
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 1.1rem 1.25rem;
+    box-shadow: var(--shadow);
+    display: grid;
+    gap: .55rem;
+  }
+
+  .finding-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .rank {
+    font-family: var(--mono);
+    font-size: .7rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .confidence {
+    font-family: var(--mono);
+    font-size: .95rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+  }
+
+  .finding p {
+    font-size: .93rem;
+    color: var(--ink-soft);
+  }
+
+  .meter {
+    height: 3px;
+    background: var(--surface-sunk);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .meter span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+
+  .guards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: .1rem 2rem;
+  }
+
+  .guard {
+    padding: .95rem 0;
+    border-top: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: .3rem;
+  }
+
+  .guard p {
+    font-size: .89rem;
+    color: var(--ink-soft);
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: .84em;
+    background: var(--surface-sunk);
+    padding: .1em .35em;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+
+  .callout {
+    border-left: 2px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 1.05rem 1.3rem;
+    border-radius: 0 4px 4px 0;
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+  }
+  .callout p { font-size: .93rem; color: var(--ink-soft); }
+  .callout strong { color: var(--ink); }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding-top: 1.75rem;
+    font-size: .85rem;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+  }
+
+  @media (max-width: 34rem) {
+    body { font-size: 16px; }
+    ol.pipeline li { grid-template-columns: 1.6rem 1fr; gap: .1rem .7rem; }
+    .finding-top { flex-direction: column; gap: .2rem; }
+  }
+</style>
+
+<div class="page">
+
+  <header>
+    <p class="eyebrow">Autonomous Incident Resolution Platform</p>
+    <h1>The reconstruction is the expensive part. Not the fix.</h1>
+    <p class="lede">
+      When ShopFast breaks at two in the morning, an engineer spends the first
+      forty minutes not repairing anything — just working out what happened, across
+      six tools. AIRP does that reconstruction in about ninety seconds, cites its
+      sources, and then stops and asks permission before it touches anything.
+    </p>
+    <div class="byline">
+      <span>Demo brief</span>
+      <span>ShopFast · namespace shopfast</span>
+      <span>Models: IBM Bob</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">What the cluster looked like</p>
+      <h2>A real failure, not a scripted one</h2>
+    </div>
+    <p>
+      This is the live state of the ShopFast namespace during the demo — five
+      microservices deployed by Helm from the client's own private repositories.
+      Four services cannot pull their image, one is in a crash loop, and an
+      automated deployment job has been cycling workloads every thirty minutes.
+    </p>
+    <div class="cluster">
+      <table>
+        <thead>
+          <tr><th>Pod</th><th>Ready</th><th>Status</th><th>Restarts</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>s1-checkout</td><td>0/1</td><td><span class="state bad">ImagePullBackOff</span></td><td>0</td></tr>
+          <tr><td>s2-inventory</td><td>0/1</td><td><span class="state bad">ImagePullBackOff</span></td><td>0</td></tr>
+          <tr><td>s3-pricing</td><td>0/1</td><td><span class="state bad">CrashLoopBackOff</span></td><td>14</td></tr>
+          <tr><td>s4-payment</td><td>0/1</td><td><span class="state bad">ImagePullBackOff</span></td><td>0</td></tr>
+          <tr><td>s5-recommendation</td><td>0/1</td><td><span class="state bad">ImagePullBackOff</span></td><td>0</td></tr>
+          <tr><td>frontend</td><td>1/1</td><td><span class="state good">Running</span></td><td>0</td></tr>
+          <tr><td>event-watcher</td><td>1/1</td><td><span class="state good">Running</span></td><td>0</td></tr>
+          <tr><td>auto-update-deployments</td><td>0/1</td><td><span class="state warn">Completed</span></td><td>0</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">What happened next</p>
+      <h2>Six agents, each with one narrow job</h2>
+    </div>
+    <ol class="pipeline">
+      <li>
+        <h3>Monitoring</h3>
+        <p>Confirms the alert is a real signal rather than noise, and sets its severity.</p>
+      </li>
+      <li>
+        <h3>Correlation</h3>
+        <p>Resolves the alert to a service, a namespace, a pod and a source repository.</p>
+      </li>
+      <li>
+        <h3>Root cause</h3>
+        <p>Plans what evidence it needs, then collects it — pod state, events and rollout history from Kubernetes, commits and pull requests from GitHub, image metadata from the registry. Read-only throughout.</p>
+      </li>
+      <li>
+        <h3>Remediation</h3>
+        <p>Drafts a minimal, reversible fix. Drafts it. Nothing executes without a human decision.</p>
+      </li>
+      <li>
+        <h3>Documentation</h3>
+        <p>Writes the incident record while the context is still fresh — the step teams skip.</p>
+      </li>
+      <li>
+        <h3>Memory</h3>
+        <p>Embeds the incident so the next one that looks like it arrives with precedent attached.</p>
+      </li>
+    </ol>
+    <p>
+      The whole sequence runs as a durable workflow. If a node dies mid-investigation,
+      it resumes exactly where it stopped — nothing is lost and nothing runs twice.
+    </p>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">The output</p>
+      <h2>Three ranked hypotheses, not one guess</h2>
+    </div>
+    <p>
+      Produced by a live model call against live infrastructure. No service names,
+      image tags or job names were configured in advance — the platform found them.
+    </p>
+    <div class="findings">
+      <div class="finding">
+        <div class="finding-top">
+          <span class="rank">Leading hypothesis</span>
+          <span class="confidence">0.72</span>
+        </div>
+        <div class="meter"><span style="width:72%"></span></div>
+        <p>
+          The checkout container exceeded its Kubernetes memory limit and was
+          OOMKilled — either a leak or an undersized limit. The
+          <code>auto-update-deployments</code> job may have rolled out an image with
+          higher memory consumption.
+        </p>
+      </div>
+      <div class="finding">
+        <div class="finding-top">
+          <span class="rank">Alternative</span>
+          <span class="confidence">0.65</span>
+        </div>
+        <div class="meter"><span style="width:65%"></span></div>
+        <p>
+          The <code>s1-checkout</code> image has no manifest entry matching the node
+          architecture — an arm64 / amd64 mismatch introduced by the same automated
+          deployment job.
+        </p>
+      </div>
+      <div class="finding">
+        <div class="finding-top">
+          <span class="rank">Contributing factor</span>
+          <span class="confidence">0.40</span>
+        </div>
+        <div class="meter"><span style="width:40%"></span></div>
+        <p>
+          The deployment job cycles multiple workloads every thirty minutes. The
+          resulting churn raises memory pressure on the node.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">The part that matters</p>
+      <h2>Built to be doubted</h2>
+    </div>
+    <p>
+      An assistant that is confidently wrong during an incident is worse than no
+      assistant. Every design decision below exists to make that failure mode
+      visible rather than quiet.
+    </p>
+    <div class="guards">
+      <div class="guard">
+        <h3>Claims carry citations</h3>
+        <p>A hypothesis referencing evidence the platform did not actually collect is rejected automatically, before anyone reads it.</p>
+      </div>
+      <div class="guard">
+        <h3>Low confidence escalates</h3>
+        <p>Below the configured threshold it hands over to a human rather than asserting more loudly.</p>
+      </div>
+      <div class="guard">
+        <h3>Investigation cannot write</h3>
+        <p>Evidence collection holds read-only credentials. Changing anything is a separate, gated path.</p>
+      </div>
+      <div class="guard">
+        <h3>Approval before action</h3>
+        <p>Remediation plans, pull requests and issues wait for an explicit human decision.</p>
+      </div>
+      <div class="guard">
+        <h3>Secrets never reach the model</h3>
+        <p>Payloads are redacted before any prompt leaves the platform.</p>
+      </div>
+      <div class="guard">
+        <h3>Every call is auditable</h3>
+        <p>Model name, prompt version, latency and a hash of each response are recorded and replayable months later.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">Running it for real</p>
+      <h2>Local today, managed services tomorrow</h2>
+    </div>
+    <p>
+      The demo environment runs on a local Kubernetes cluster so it can be shown
+      anywhere, including on a plane. Every component has a managed IBM Cloud
+      equivalent, and the swap is configuration rather than a rewrite.
+    </p>
+    <div class="callout">
+      <p><strong>Alert bus</strong> — Kafka locally, IBM Event Streams in production.</p>
+      <p><strong>State and memory</strong> — Postgres with vector search and Redis, both available as managed services.</p>
+      <p><strong>Workloads</strong> — any conformant Kubernetes, including IBM Kubernetes Service.</p>
+      <p><strong>Inference</strong> — IBM models throughout. Your source code and incident data stay inside your tenancy.</p>
+    </div>
+    <p>
+      Alerts arrive from whatever you already run — Prometheus, Instana, Dynatrace.
+      AIRP replaces none of it. It consumes what those tools emit and does the work
+      that currently lands on a person.
+    </p>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">Next</p>
+      <h2>What a pilot looks like</h2>
+    </div>
+    <p>
+      Point AIRP at one namespace and a shortlist of alert types you already trust
+      yourselves to diagnose. Let it run in observe-only mode alongside your on-call
+      rotation, and compare its root cause against theirs, incident by incident. It
+      earns write access, or it doesn't — on evidence you collect, not on claims
+      made in a demo.
+    </p>
+  </section>
+
+  <footer>
+    <p>Every figure in this brief came from a live run against the cluster shown above.</p>
+    <p>Nothing here is projected, modelled, or averaged from other engagements.</p>
+  </footer>
+
+</div>
