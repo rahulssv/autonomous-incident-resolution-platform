@@ -34,3 +34,6 @@ vendor/*
 
 # Local kind kubeconfig for the kubernetes-mcp overlay (scripts/kind-kubeconfig.sh)
 .kube/
+
+# Demo voice-over renders (regenerate with demo/generate-voiceover.py)
+demo/voiceover/
